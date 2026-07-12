@@ -1,0 +1,20 @@
+# Python Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Lokale Daten (Strikter Ausschluss von Rohdaten)
+data/*
+!data/.gitkeep
+
+# OS generierte Dateien
+.DS_Store
+Thumbs.db
