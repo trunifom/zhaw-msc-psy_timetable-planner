@@ -1,14 +1,12 @@
-name: clinical_pipeline_env
+# environment.yml
+name: zhaw_planner_env
 channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.11
-  - pip
-  - pandas=2.2.0
-  - numpy=1.26.4
-  - scikit-learn=1.4.0
-  - pip:
-      - APScheduler==3.10.4
-      - pytest==8.0.0
-      - black==24.1.1
+  - python=3.10
+  - streamlit
+  - pandas
+  - plotly
+  - pydantic
+  - pytest
