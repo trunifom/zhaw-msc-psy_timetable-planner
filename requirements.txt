@@ -1,0 +1,22 @@
+# ==========================================
+# Clinical Pipeline Dependencies
+# ==========================================
+
+# --- Orchestration & Scheduling ---
+APScheduler==3.10.4
+
+# --- Data Manipulation & Analysis ---
+pandas==2.2.0
+numpy==1.26.4
+
+# --- Machine Learning & Modeling (Beispiele für die Pipeline) ---
+scikit-learn==1.4.0
+
+# --- Logging & Monitoring ---
+# (Standard-Bibliothek 'logging' erfordert keinen Eintrag, aber 
+# hier könnten externe Tools wie Sentry oder Prometheus stehen)
+
+# --- Development & Testing (Optional, aber Best Practice) ---
+pytest==8.0.0
+black==24.1.1
+flake8==7.0.0
