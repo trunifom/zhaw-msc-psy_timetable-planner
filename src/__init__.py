@@ -1,22 +1,31 @@
 """
-Clinical Data Pipeline Package.
+Stundenplan Planner Package.
 
-Dieses Modul stellt die Infrastruktur für automatisierte Datenverarbeitung,
-prädiktive Modellierung und Orchestrierung im klinischen Umfeld bereit.
-Alle Kernkomponenten sind so konzipiert, dass sie DSGVO-konform und 
-fehlertolerant arbeiten.
+Dieses Modul stellt die Kernarchitektur für die Erstellung, 
+Verwaltung und Ressourcen-Optimierung (Räume, Lehrkräfte, Klassen) 
+von Stundenplänen zur Verfügung.
 """
 
-# Exponieren der Hauptklasse für einen sauberen und einfachen Import
-# an anderer Stelle (z. B.: from src import ClinicalPipelineScheduler)
-from .scheduler import ClinicalPipelineScheduler
+# 1. Metadaten des Pakets
+__version__ = "0.1.0"
+__author__ = "Dein Name"
 
-# Definition von Metadaten für das Package
-__version__ = "1.0.0"
-__author__ = "HealthData Architecture Team"
+# 2. Imports für das Facade-Pattern
+# Anwender können nun `from planner import Timetable` nutzen, 
+# statt `from planner.scheduler import Timetable`
+from .models import Course, Room, Teacher, TimeSlot
+from .scheduler import Timetable, ScheduleOptimizer
+from .export import export_timetable_to_pdf, export_to_csv
 
-# __all__ definiert explizit, was importiert wird, wenn jemand 
-# `from src import *` aufruft. Dies verhindert Namespace-Pollution.
+# 3. Öffentliche API definieren
+# Schützt vor unerwünschten Importen bei `from planner import *`
 __all__ = [
-    "ClinicalPipelineScheduler",
+    "Course",
+    "Room",
+    "Teacher",
+    "TimeSlot",
+    "Timetable",
+    "ScheduleOptimizer",
+    "export_timetable_to_pdf",
+    "export_to_csv",
 ]

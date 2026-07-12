@@ -8,6 +8,7 @@ robust error handling, and separation of concerns.
 import streamlit as st
 import pandas as pd
 from typing import List, Tuple, Any
+from export import prepare_timetable_for_export, generate_excel_download
 
 # Assuming these are available from the previously defined business/data logic layers
 try:
