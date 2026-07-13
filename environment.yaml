@@ -7,6 +7,10 @@ dependencies:
   # Pinne NumPy auf 1.x, um C-API Brüche bei Pandas/Streamlit zu vermeiden
   - numpy>=1.26.0,<2.0.0 
   - pandas>=2.1.0
+  - plotly>=5.0.0
+  - pydantic>=2.0.0
+  - openpyxl>=3.1.0
+  - pytest>=7.0.0
   - pip:
     - streamlit>=1.32.0
     - pyarrow>=15.0.0

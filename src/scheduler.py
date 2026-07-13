@@ -11,10 +11,83 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import time, datetime
+from typing import Iterable
 from pydantic import ValidationError
 
 # Import the strictly validated domain model and enum from our data layer
 from models import ZHAWModule, Weekday
+
+
+def _weekday_key(module: ZHAWModule) -> str:
+    """Return a normalized weekday key for robust comparison."""
+    value = getattr(module.wochentag, "value", module.wochentag)
+    return str(value).strip().lower()
+
+
+def _to_minutes(value: time) -> int:
+    """Convert a time object to minutes since midnight."""
+    return value.hour * 60 + value.minute
+
+
+def _same_occurrence(left: ZHAWModule, right: ZHAWModule) -> bool:
+    """Return True when two rows refer to the same schedulable occurrence."""
+    left_date = getattr(left, "datum", None)
+    right_date = getattr(right, "datum", None)
+    if left_date is not None and right_date is not None:
+        return left_date == right_date
+    return _weekday_key(left) == _weekday_key(right)
+
+
+def _semantic_signature(module: ZHAWModule) -> tuple:
+    """Stable signature to suppress exact duplicate rows in conflict results."""
+    return (
+        getattr(module, "datum", None),
+        _weekday_key(module),
+        _to_minutes(module.startzeit),
+        _to_minutes(module.endzeit),
+        str(getattr(module, "modul_nr", "") or "").strip(),
+        str(getattr(module, "kurs_nr", "") or "").strip(),
+        str(getattr(module, "modulname", "") or "").strip(),
+        str(getattr(module, "raum", "") or "").strip(),
+    )
+
+
+def find_time_conflicts(modules: Iterable[ZHAWModule]) -> list[tuple[ZHAWModule, ZHAWModule]]:
+    """
+    Detect overlapping modules on the same weekday.
+
+    Returns:
+        list[tuple[ZHAWModule, ZHAWModule]]: Pairs of conflicting modules.
+    """
+    module_list = list(modules or [])
+    conflicts: list[tuple[ZHAWModule, ZHAWModule]] = []
+    seen_pairs: set[tuple[tuple, tuple]] = set()
+
+    for i, left in enumerate(module_list):
+        left_start = _to_minutes(left.startzeit)
+        left_end = _to_minutes(left.endzeit)
+        left_signature = _semantic_signature(left)
+
+        for right in module_list[i + 1 :]:
+            if not _same_occurrence(left, right):
+                continue
+
+            right_signature = _semantic_signature(right)
+            if left_signature == right_signature:
+                continue
+
+            right_start = _to_minutes(right.startzeit)
+            right_end = _to_minutes(right.endzeit)
+
+            # Intervals [a,b) and [c,d) overlap iff a < d and c < b.
+            if left_start < right_end and right_start < left_end:
+                pair_key = tuple(sorted((left_signature, right_signature)))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                conflicts.append((left, right))
+
+    return conflicts
 
 # ==========================================
 # 1. APPLICATION CONFIGURATION & STATE

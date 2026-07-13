@@ -8,6 +8,10 @@ Ein interaktives, Python-basiertes Planungstool zur systematischen und überschn
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## 📚 Spezifikationen
+
+- HealthData CodeArchitect (KI-Assistent): siehe `docs/HealthData-CodeArchitect.md`
+
 ## 📌 Über das Projekt
 
 Der **ZHAW MSc Psychology Timetable Planner** ist eine massgeschneiderte Webapplikation zur effizienten Semesterplanung. Der Masterstudiengang Psychologie erfordert oft die Koordination flexibler Studienmodelle (Vollzeit vs. Teilzeit) sowie die Abstimmung diverser Wahlpflichtmodule. 
