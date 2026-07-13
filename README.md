@@ -1,75 +1,173 @@
-# zhaw-msc-psy_timetable-planner
-Ein interaktives, Python-basiertes Planungstool zur systematischen und überschneidungsfreien Modul- und Stundenplanplanung für den Masterstudiengang Psychologie an der ZHAW. Bietet algorithmische Konflikterkennung und lokales, datenschutzkonformes In-Memory-Processing via Streamlit.
+# ZHAW MSc Psychology Timetable Planner
 
-# ZHAW MSc Psychology - Timetable Planner 📅
+Interaktive Streamlit-Anwendung für die modulbasierte Semesterplanung im MSc Psychologie (ZHAW) mit Fokus auf:
 
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.28%2B-FF4B4B.svg)](https://streamlit.io/)
-[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+- robuste Excel/CSV-Imports
+- geführte Studienplanung
+- konfliktsichere Terminwahl
+- Visualisierung über Woche und Semester
+- Export als Excel und ICS
 
-## 📚 Spezifikationen
+## Ziel des Tools
 
-- HealthData CodeArchitect (KI-Assistent): siehe `docs/HealthData-CodeArchitect.md`
+Die App hilft Studierenden, aus ZHAW-Exportdaten einen realistisch belegbaren Stundenplan zusammenzustellen.
+Besonders unterstützt werden:
 
-## 📌 Über das Projekt
+- Modul- und Kurslogik mit Varianten/Gruppen
+- Konflikterkennung mit Datumskontext
+- Prüfungsprüfung gegen gewählte Termine
+- transparente Rohdatenansicht
 
-Der **ZHAW MSc Psychology Timetable Planner** ist eine massgeschneiderte Webapplikation zur effizienten Semesterplanung. Der Masterstudiengang Psychologie erfordert oft die Koordination flexibler Studienmodelle (Vollzeit vs. Teilzeit) sowie die Abstimmung diverser Wahlpflichtmodule. 
+## Feature-Überblick
 
-Dieses Tool automatisiert den Abgleich von Modulzeiten, identifiziert Vorlesungsüberschneidungen auf algorithmischer Ebene und visualisiert den resultierenden Stundenplan übersichtlich in einem interaktiven Dashboard.
+- Geführte Planung mit dynamischen Fragen (Abwesenheit, Tage, Halbtage, Filter)
+- Auswahlmodi:
+	- modulbasiert (empfohlen)
+	- kursbasiert
+	- zeilenbasiert
+- Konfliktanalyse mit:
+	- Paar-Zusammenfassung
+	- Detailansicht nach Datum und Uhrzeit
+	- Überlappungsminuten und Prozentwerten
+- Visualisierung:
+	- Wochen-Timeline
+	- Semester-Timeline
+	- Tageslast über den gesamten Zeitraum
+	- Wochentagsverteilung
+- Export:
+	- XLSX
+	- ICS (nur Termine mit Datum)
+- Mehrsprachigkeit (de/en/fr) über zentrale i18n-Keys
 
-## ✨ Hauptfunktionen
+## Architektur
 
-*   **Datenintegration & Bereinigung:** Automatisierter Upload von Modulplänen via Excel/CSV mit strenger Datentyp-Validierung (`pandas`, `pydantic`).
-*   **Algorithmische Konfliktanalyse:** Systematische Prüfung von Zeitfenstern zur Vermeidung von Doppelbelegungen und zur Sicherstellung von minimalen Pausenzeiten.
-*   **Interaktives GUI:** Benutzerfreundliches Frontend via Streamlit mit dynamischen Filtern (z.B. nach Vertiefungsrichtung, Dozierenden, Wochentagen).
-*   **Export & Reporting:** Generierung exportierbarer, publikationsreifer Stundenpläne zur nahtlosen Integration in den akademischen Alltag.
+- Präsentation: [src/app.py](src/app.py)
+- Import/Bereinigung: [src/data_loader.py](src/data_loader.py)
+- Domänenmodell: [src/models.py](src/models.py)
+- Konfliktlogik: [src/scheduler.py](src/scheduler.py)
+- Exportlogik: [src/export.py](src/export.py)
+- Übersetzungen: [src/i18n.py](src/i18n.py)
+- i18n-Konventionen: [docs/i18n-README.md](docs/i18n-README.md)
 
-## 🏗 Systemarchitektur (Separation of Concerns)
+## Schnellstart
 
-Das Projekt ist modular aufgebaut, um Skalierbarkeit und Testbarkeit zu maximieren:
+### 1. Environment vorbereiten
 
-1.  **Data Layer:** Zuständig für das Einlesen und Validieren der Rohdaten. Hier wird sichergestellt, dass fehlende Werte (NAs) und inkonsistente Datums-/Zeitformate systematisch bereinigt werden.
-2.  **Business Logic Layer:** Kapselt die Logik der Konflikterkennung. Unabhängig vom Frontend, vollständig modular und Unit-Test-fähig.
-3.  **Presentation Layer:** Das Streamlit-Frontend steuert das State-Management (`st.session_state`) und die Visualisierung, ohne direkte Datenmanipulationen vorzunehmen.
+Variante A: Conda mit environment.yaml
 
-## 🔒 Datenschutz & Datensicherheit
-
-Akademische Planungsdaten können potenziell sensible Informationen (Namen von Dozierenden, interne Raumzuweisungen) enthalten. Das System ist nach dem *Privacy by Design*-Prinzip konzipiert:
-*   **In-Memory Processing:** Hochgeladene Dateien werden ausschliesslich im RAM der aktiven Nutzersession verarbeitet und nach dem Schliessen des Browsers rückstandslos verworfen.
-*   **Keine Datenbank-Persistenz:** Es werden serverseitig keine Stundenpläne oder Nutzerprofile gespeichert.
-*   **Repository-Richtlinien:** Reale Planungsdaten (`*.xlsx`, `*.csv`) sind strikt von der Versionskontrolle ausgeschlossen (`.gitignore`).
-
-## 🚀 Lokales Setup (Development Environment)
-
-Um Reproduzierbarkeit zu gewährleisten, nutzen wir **Anaconda** für das Environment-Management.
-
-**1. Repository klonen:**
 ```bash
-git clone [https://github.com/DEIN_USERNAME/zhaw-msc-psy_timetable-planner.git](https://github.com/DEIN_USERNAME/zhaw-msc-psy_timetable-planner.git)
-cd zhaw-msc-psy_timetable-planner
-
-**2. Conda-Umgebung initialisieren:**
-conda create -n zhaw_planner_env python=3.10
+conda env create -f environment.yaml
 conda activate zhaw_planner_env
+```
 
-**3. Abhängigkeiten installieren:**
+Variante B: vorhandenes Python-Environment
+
+```bash
 pip install -r requirements.txt
+```
 
-**4. Applikation lokal starten:**
-streamlit run app.py
+### 2. App starten
+
+Im Repository-Root ausführen:
+
+```bash
+streamlit run src/app.py
+```
+
+## Bedienung (empfohlener Ablauf)
+
+1. Datei hochladen (CSV/XLS/XLSX)
+2. Im Tab "Geführte Planung" Filter setzen und Module/Kurse wählen
+3. Im Tab "Dashboard" Semesterüberblick prüfen
+4. Im Tab "Wochenplan" Verteilung pro Tag prüfen
+5. Im Tab "Konfliktanalyse" Kollisionen auflösen
+6. Export am Ende freischalten und als XLSX/ICS herunterladen
+
+## Dateninput und Annahmen
+
+Die Importlogik ist tolerant gegenüber Header-Varianten und Metadatenzeilen. Zentral sind u. a.:
+
+- Wochentag
+- Startzeit
+- Endzeit
+- Modulname
+- optional Datum, Modul-Nr, Kurs-Nr, Prüfungsflag
+
+Hinweis:
+
+- Wenn Datum vorhanden ist, werden Konflikte datumsgenau berechnet.
+- Ohne Datum erfolgt Konfliktprüfung auf Wochentag+Zeit.
+
+## Konfliktlogik (wichtig)
+
+In [src/scheduler.py](src/scheduler.py) gilt:
+
+- Konflikte nur bei Zeitüberlappung
+- bei vorhandenen Datumswerten nur innerhalb desselben Datums
+- exakte Duplikatzeilen werden unterdrückt
+
+Dadurch werden künstliche Mehrfachkonflikte über verschiedene Wochen minimiert.
+
+## Internationalisierung (i18n)
+
+Alle sichtbaren UI-Texte und Tabellenlabels laufen über Keys in [src/i18n.py](src/i18n.py).
+
+- UI-Text: `t("...")`
+- Spaltenlabels: `c("...")` -> `col.*`
+
+Details und Regeln siehe [docs/i18n-README.md](docs/i18n-README.md).
+
+## Tests und Checks
+
+Syntaxcheck:
+
+```bash
+python -m py_compile src/app.py src/data_loader.py src/models.py src/scheduler.py src/i18n.py
+```
+
+pytest (falls vorhanden):
+
+```bash
+pytest -q
+```
 
 ## Projektstruktur
+
+```text
 zhaw-msc-psy_timetable-planner/
-│
-├── data/                  # Lokale Rohdaten (von Git ignoriert)
-├── src/                   # Quellcode-Verzeichnis
-│   ├── app.py             # Streamlit Entry-Point
-│   ├── data_loader.py     # Pandas Import-Logik
-│   ├── models.py          # Pydantic Datenmodelle
-│   └── scheduler.py       # Algorithmen zur Konfliktprüfung
-│
-├── tests/                 # Unit-Tests (pytest)
-├── .gitignore             # Git Ignore-Regeln
-├── requirements.txt       # Python-Abhängigkeiten
-└── README.md              # Projektdokumentation
+├── data/
+├── docs/
+│   ├── HealthData-CodeArchitect.md
+│   └── i18n-README.md
+├── src/
+│   ├── app.py
+│   ├── data_loader.py
+│   ├── export.py
+│   ├── i18n.py
+│   ├── models.py
+│   └── scheduler.py
+├── tests/
+├── environment.yaml
+├── requirements.txt
+└── README.md
+```
+
+## Troubleshooting
+
+- App startet nicht:
+	- prüfen, ob das richtige Environment aktiv ist
+	- `streamlit`, `pandas`, `plotly`, `pydantic`, `openpyxl` installiert?
+- Excel wird nicht gelesen:
+	- anderes Sheet im Export versuchen
+	- Header-Zeilen im Input prüfen
+- Konflikte wirken unplausibel:
+	- sind Datumswerte vorhanden?
+	- in der Konfliktansicht zuerst Paar-Zusammenfassung, dann Detailtabelle prüfen
+- ICS wirkt unvollständig:
+	- nur Termine mit Datum werden exportiert
+
+## Datenschutz
+
+- Verarbeitung erfolgt in der laufenden Session (in-memory)
+- keine persistente Datenbank notwendig
+- hochgeladene persönliche Planungsdaten sollten nicht ins Repository eingecheckt werden

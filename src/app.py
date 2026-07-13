@@ -222,6 +222,12 @@ def _weekday_label(module: Any) -> str:
     return translated
 
 
+def _weekday_key(module: Any) -> str:
+    """Return canonical weekday key (language independent)."""
+    value = getattr(module.wochentag, "value", module.wochentag)
+    return str(value).strip().lower()
+
+
 def _weekday_labels_in_order() -> list[str]:
     return [
         t("weekday.montag"),
@@ -234,9 +240,18 @@ def _weekday_labels_in_order() -> list[str]:
     ]
 
 
+def _weekday_keys_in_order() -> list[str]:
+    return ["montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag"]
+
+
 def _blocking_weekday_labels() -> list[str]:
     """Weekdays shown in the blocked-days selector; weekends remain supported internally."""
     return _weekday_labels_in_order()[:5]
+
+
+def _blocking_weekday_keys() -> list[str]:
+    """Weekday keys shown in blocked-days selector; weekends remain supported internally."""
+    return _weekday_keys_in_order()[:5]
 
 
 def _semester_date_bounds(modules: List[Any]) -> tuple[date | None, date | None]:
@@ -253,6 +268,247 @@ def _default_absence_end(start_value: date, max_value: date | None) -> date:
     if max_value is not None and candidate > max_value:
         return max_value
     return candidate
+
+
+def _absence_settings() -> dict[str, Any]:
+    """Normalized absence settings persisted from guided planning widgets."""
+    raw_blocked_days = st.session_state.get("absence_blocked_days_values", []) or []
+    normalized_blocked_days: set[str] = set()
+    for day in raw_blocked_days:
+        token = str(day).strip().lower()
+        if token in _weekday_keys_in_order():
+            normalized_blocked_days.add(token)
+            continue
+        for key in _weekday_keys_in_order():
+            if token == t(f"weekday.{key}").strip().lower():
+                normalized_blocked_days.add(key)
+                break
+
+    return {
+        "period_enabled": bool(st.session_state.get("absence_period_enabled", False)),
+        "period_start": st.session_state.get("absence_period_start"),
+        "period_end": st.session_state.get("absence_period_end"),
+        "dates_enabled": bool(st.session_state.get("absence_dates_enabled", False)),
+        "dates": set(st.session_state.get("absence_dates_values", []) or []),
+        "blocked_enabled": bool(st.session_state.get("absence_blocked_enabled", False)),
+        "blocked_days": normalized_blocked_days,
+        "blocked_halfday": st.session_state.get("absence_blocked_halfday_value", t("guided.full_day")),
+    }
+
+
+def _absence_rules_summary(settings: dict[str, Any]) -> list[str]:
+    """Human-readable summary of active absence constraints."""
+    rules: list[str] = []
+
+    if settings["period_enabled"] and settings["period_start"] and settings["period_end"]:
+        rules.append(
+            t(
+                "dashboard.absence.period",
+                start=settings["period_start"].strftime("%d.%m.%Y"),
+                end=settings["period_end"].strftime("%d.%m.%Y"),
+            )
+        )
+
+    if settings["dates_enabled"] and settings["dates"]:
+        sorted_dates = sorted(settings["dates"])
+        shown = ", ".join(d.strftime("%d.%m.%Y") for d in sorted_dates[:5])
+        suffix = " ..." if len(sorted_dates) > 5 else ""
+        rules.append(t("dashboard.absence.dates", dates=f"{shown}{suffix}"))
+
+    if settings["blocked_enabled"] and settings["blocked_days"]:
+        days = ", ".join(t(f"weekday.{d}") for d in sorted(settings["blocked_days"]))
+        rules.append(
+            t(
+                "dashboard.absence.blocked_days",
+                days=days,
+                halfday=settings["blocked_halfday"],
+            )
+        )
+
+    return rules
+
+
+def _absence_reasons_for_module(module: Any, settings: dict[str, Any]) -> list[str]:
+    """Return all matching absence reasons for a module row."""
+    reasons: list[str] = []
+    datum_value = getattr(module, "datum", None)
+    day_key = _weekday_key(module)
+
+    if settings["period_enabled"] and settings["period_start"] and settings["period_end"] and datum_value is not None:
+        if settings["period_start"] <= datum_value <= settings["period_end"]:
+            reasons.append(t("absence.reason.period"))
+
+    if settings["dates_enabled"] and datum_value in settings["dates"]:
+        reasons.append(t("absence.reason.date"))
+
+    if settings["blocked_enabled"] and day_key in settings["blocked_days"] and _matches_halfday(module, settings["blocked_halfday"]):
+        reasons.append(t("absence.reason.weekday_halfday", halfday=settings["blocked_halfday"]))
+
+    return reasons
+
+
+def _absence_conflict_dataframe(modules: List[Any], settings: dict[str, Any]) -> pd.DataFrame:
+    """Build table rows for modules violating active absence constraints."""
+    if not modules:
+        return pd.DataFrame()
+
+    rows = []
+    for module in modules:
+        reasons = _absence_reasons_for_module(module, settings)
+        if not reasons:
+            continue
+        rows.append(
+            {
+                c("date"): _conflict_date_label(module),
+                c("weekday"): _weekday_label(module),
+                c("module"): _module_label(module),
+                c("time"): f"{module.startzeit.strftime('%H:%M')} - {module.endzeit.strftime('%H:%M')}",
+                c("reason"): ", ".join(reasons),
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values([c("date"), c("weekday"), c("time")], ascending=[True, True, True])
+
+
+def _absence_course_impact_dataframe(modules: List[Any], settings: dict[str, Any]) -> pd.DataFrame:
+    """Summarize absence impact per base course including absence percentages."""
+    if not modules:
+        return pd.DataFrame()
+
+    totals: dict[str, dict[str, Any]] = {}
+    for module in modules:
+        key = _module_group_title(module)
+        if key not in totals:
+            totals[key] = {
+                c("base_course"): key,
+                c("rows"): 0,
+                c("absence_rows"): 0,
+                c("absence_pct"): 0.0,
+                c("attendance_req_pct"): None,
+                c("allowed_absence_pct"): None,
+                c("risk_status"): t("absence.risk.unknown"),
+            }
+
+        totals[key][c("rows")] += 1
+        if _absence_reasons_for_module(module, settings):
+            totals[key][c("absence_rows")] += 1
+
+        raw_req = getattr(module, "anwesenheitspflicht_prozent", None)
+        if raw_req is not None and totals[key][c("attendance_req_pct")] is None:
+            try:
+                totals[key][c("attendance_req_pct")] = float(raw_req)
+            except Exception:
+                pass
+
+    rows = []
+    for row in totals.values():
+        total = max(1, int(row[c("rows")]))
+        impacted = int(row[c("absence_rows")])
+        absence_pct = round((impacted / total) * 100.0, 1)
+        row[c("absence_pct")] = absence_pct
+
+        req = row[c("attendance_req_pct")]
+        if req is None:
+            row[c("allowed_absence_pct")] = None
+            row[c("risk_status")] = t("absence.risk.unknown")
+        else:
+            allowed = max(0.0, min(100.0, 100.0 - float(req)))
+            row[c("allowed_absence_pct")] = round(allowed, 1)
+            row[c("risk_status")] = t("absence.risk.high") if absence_pct > allowed else t("absence.risk.ok")
+
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    return df.sort_values([c("absence_pct"), c("absence_rows"), c("base_course")], ascending=[False, False, True])
+
+
+def _style_absence_rows(df: pd.DataFrame, reason_col: str) -> Any:
+    """Style rows to highlight absence-related violations."""
+    def _row_style(row: pd.Series) -> list[str]:
+        has_reason = bool(str(row.get(reason_col, "")).strip())
+        if has_reason:
+            return ["background-color: rgba(220, 38, 38, 0.24)"] * len(row)
+        return [""] * len(row)
+
+    return df.style.apply(_row_style, axis=1)
+
+
+def _style_risk_rows(df: pd.DataFrame) -> Any:
+    """Style course impact table by risk status."""
+    status_col = c("risk_status")
+
+    def _row_style(row: pd.Series) -> list[str]:
+        status = str(row.get(status_col, ""))
+        if status == t("absence.risk.high"):
+            return ["background-color: rgba(220, 38, 38, 0.24)"] * len(row)
+        if status == t("absence.risk.ok"):
+            return ["background-color: rgba(34, 197, 94, 0.18)"] * len(row)
+        return ["background-color: rgba(234, 179, 8, 0.14)"] * len(row)
+
+    return df.style.apply(_row_style, axis=1)
+
+
+def _absence_overlay_for_week(settings: dict[str, Any]) -> pd.DataFrame:
+    """Create overlay rows for blocked weekdays in weekly timeline chart."""
+    if not settings.get("blocked_enabled") or not settings.get("blocked_days"):
+        return pd.DataFrame()
+
+    halfday = settings.get("blocked_halfday", t("guided.full_day"))
+    if halfday == t("guided.morning"):
+        start = "00:00:00"
+        end = "12:00:00"
+    elif halfday == t("guided.afternoon"):
+        start = "12:00:00"
+        end = "23:59:00"
+    else:
+        start = "00:00:00"
+        end = "23:59:00"
+
+    rows = []
+    for day_key in sorted(settings.get("blocked_days", []), key=lambda d: _weekday_keys_in_order().index(d) if d in _weekday_keys_in_order() else 99):
+        rows.append(
+            {
+                c("weekday"): t(f"weekday.{day_key}"),
+                c("module"): t("timetable.absence_overlay_label"),
+                c("start"): pd.to_datetime(f"1970-01-01 {start}"),
+                c("end"): pd.to_datetime(f"1970-01-01 {end}"),
+                c("type"): t("timetable.absence_overlay_type"),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _lessons_per_week(modules: List[Any]) -> tuple[float, float, int]:
+    """Return lessons/week based on recurring rows + average dated week load."""
+    if not modules:
+        return (0.0, 0.0, 0)
+
+    undated_minutes = sum(m.duration_minutes for m in modules if getattr(m, "datum", None) is None)
+
+    dated_rows = []
+    for module in modules:
+        datum_value = getattr(module, "datum", None)
+        if datum_value is None:
+            continue
+        iso = datum_value.isocalendar()
+        dated_rows.append({"year": iso.year, "week": iso.week, "minutes": module.duration_minutes})
+
+    avg_dated_week_minutes = 0.0
+    observed_weeks = 0
+    if dated_rows:
+        dated_df = pd.DataFrame(dated_rows)
+        weekly = dated_df.groupby(["year", "week"], as_index=False)["minutes"].sum()
+        avg_dated_week_minutes = float(weekly["minutes"].mean())
+        observed_weeks = int(len(weekly))
+
+    total_week_minutes = undated_minutes + avg_dated_week_minutes
+    lessons = round(total_week_minutes / 45.0, 1)
+    hours = round(total_week_minutes / 60.0, 1)
+    return (lessons, hours, observed_weeks)
 
 
 def _matches_halfday(module: Any, halfday: str) -> bool:
@@ -600,7 +856,7 @@ def _semester_timeline_figure(modules: List[Any]):
     )
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(
-        height=440,
+        height=560,
         margin=dict(l=10, r=10, t=40, b=10),
         xaxis_title=t("chart.xaxis_semester"),
         yaxis_title="",
@@ -624,7 +880,7 @@ def _daily_load_figure(modules: List[Any]):
     df = pd.DataFrame(rows)
     daily = df.groupby(c("date"), as_index=False)[c("duration_min")].sum()
     fig = px.bar(daily, x=c("date"), y=c("duration_min"), title=t("chart.daily_load_title"))
-    fig.update_layout(height=300, margin=dict(l=10, r=10, t=40, b=10), yaxis_title=t("chart.yaxis_minutes"), xaxis_title=t("chart.xaxis_semester"))
+    fig.update_layout(height=420, margin=dict(l=10, r=10, t=40, b=10), yaxis_title=t("chart.yaxis_minutes"), xaxis_title=t("chart.xaxis_semester"))
     return fig
 
 
@@ -672,6 +928,7 @@ def _weekly_timeline_figure(modules: List[Any]):
     day_labels = _weekday_labels_in_order()
     day_order = {label: idx for idx, label in enumerate(day_labels)}
     rows = []
+    settings = _absence_settings()
     for module in modules:
         rows.append(
             {
@@ -684,6 +941,9 @@ def _weekly_timeline_figure(modules: List[Any]):
         )
 
     df = pd.DataFrame(rows)
+    overlay_df = _absence_overlay_for_week(settings)
+    if not overlay_df.empty:
+        df = pd.concat([df, overlay_df], ignore_index=True)
     if df.empty:
         return None
 
@@ -715,7 +975,7 @@ def _weekday_bar_figure(modules: List[Any]):
     df = pd.DataFrame({c("weekday"): [_weekday_label(m) for m in modules]})
     order = _weekday_labels_in_order()
     fig = px.bar(df, x=c("weekday"), title=t("chart.weekday_title"), category_orders={c("weekday"): order})
-    fig.update_layout(height=280, margin=dict(l=10, r=10, t=40, b=10), yaxis_title=t("chart.yaxis_items"))
+    fig.update_layout(height=420, margin=dict(l=10, r=10, t=40, b=10), yaxis_title=t("chart.yaxis_items"))
     return fig
 
 
@@ -732,7 +992,7 @@ def _overlap_bar_figure(summary_df: pd.DataFrame):
         color=c("overlap_pct"),
         color_continuous_scale="Reds",
     )
-    fig.update_layout(height=max(320, 26 * len(top) + 120), margin=dict(l=10, r=10, t=40, b=10))
+    fig.update_layout(height=max(440, 32 * len(top) + 140), margin=dict(l=10, r=10, t=40, b=10))
     return fig
 
 
@@ -819,6 +1079,10 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     )
                     absence_period_valid = False
 
+        st.session_state.absence_period_enabled = has_absence_period == t("guided.yes")
+        st.session_state.absence_period_start = absence_start
+        st.session_state.absence_period_end = absence_end
+
         has_absent_dates = st.radio(
             t("guided.q.absent_dates"),
             options=[t("guided.no"), t("guided.yes")],
@@ -841,6 +1105,9 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             else:
                 st.caption(t("guided.no_dates_found"))
 
+        st.session_state.absence_dates_enabled = has_absent_dates == t("guided.yes")
+        st.session_state.absence_dates_values = absent_dates
+
         has_blocked_days = st.radio(
             t("guided.q.blocked_days"),
             options=[t("guided.no"), t("guided.yes")],
@@ -853,7 +1120,8 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         if has_blocked_days == t("guided.yes"):
             blocked_days = st.multiselect(
                 t("guided.blocked_days"),
-                options=_blocking_weekday_labels(),
+                options=_blocking_weekday_keys(),
+                format_func=lambda day_key: t(f"weekday.{day_key}"),
                 key="blocked_days",
             )
             blocked_halfday = st.selectbox(
@@ -861,6 +1129,10 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 options=[t("guided.full_day"), t("guided.morning"), t("guided.afternoon")],
                 key="blocked_halfday",
             )
+
+        st.session_state.absence_blocked_enabled = has_blocked_days == t("guided.yes")
+        st.session_state.absence_blocked_days_values = blocked_days
+        st.session_state.absence_blocked_halfday_value = blocked_halfday
 
     with st.container(border=True):
         st.markdown(t("guided.step2"))
@@ -928,16 +1200,6 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         day_label = _weekday_label(module)
         modul_nr_value = str(getattr(module, "modul_nr", "") or "").lower()
         kurs_nr_value = str(getattr(module, "kurs_nr", "") or "").lower()
-
-        if has_absence_period == t("guided.yes") and absence_period_valid and absence_start and absence_end and datum_value:
-            if absence_start <= datum_value <= absence_end:
-                continue
-
-        if has_absent_dates == t("guided.yes") and datum_value in absent_date_set:
-            continue
-
-        if has_blocked_days == t("guided.yes") and day_label in blocked_days and _matches_halfday(module, blocked_halfday):
-            continue
 
         if modul_nr_search and modul_nr_search not in modul_nr_value:
             continue
@@ -1219,7 +1481,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 variant_labels = sorted({it[2] if it[2] else "STANDARD" for it in items})
                 exam_count = sum(1 for it in items if it[3])
                 st.markdown(f"**{base}**")
-            st.caption(t("guided.course_details_caption", variants=", ".join(variant_labels), exams=exam_count))
+                st.caption(t("guided.course_details_caption", variants=", ".join(variant_labels), exams=exam_count))
 
     else:
         rows = []
@@ -1278,54 +1540,52 @@ def render_sidebar() -> None:
         st.header(t("sidebar.header"))
         st.markdown(t("sidebar.description"))
 
-        language_options = {
-            t("sidebar.language_option.de"): "de",
-            t("sidebar.language_option.en"): "en",
-            t("sidebar.language_option.fr"): "fr",
-        }
-        selected_language = st.selectbox(
-            t("sidebar.language"),
-            options=list(language_options.keys()),
-            index=["de", "en", "fr"].index(st.session_state.get("ui_language", "de")),
-            key="sidebar_language_selector",
-        )
-        st.session_state.ui_language = language_options[selected_language]
-        
-        # File uploader widget
-        uploaded_file = st.file_uploader(
-            t("sidebar.upload_label"), 
-            type=["csv", "xlsx", "xls"],
-            help=t("sidebar.upload_help")
-        )
-        
-        if uploaded_file is not None:
-            # Only trigger processing if a new file is uploaded or state is empty
-            if st.session_state.raw_data is None or uploaded_file.name not in str(st.session_state.raw_data):
-                with st.spinner(t("sidebar.parsing")):
-                    handle_file_upload(uploaded_file)
-        else:
-            # Reset state if file is removed
-            st.session_state.raw_data = None
-            st.session_state.processed_modules = []
-            st.session_state.conflicts = []
-            st.session_state.selected_modules = []
-            st.session_state.selected_course_bases = []
+        with st.container(border=True):
+            st.markdown(f"**{t('sidebar.section.data')}**")
+            language_options = {
+                t("sidebar.language_option.de"): "de",
+                t("sidebar.language_option.en"): "en",
+                t("sidebar.language_option.fr"): "fr",
+            }
+            selected_language = st.selectbox(
+                t("sidebar.language"),
+                options=list(language_options.keys()),
+                index=["de", "en", "fr"].index(st.session_state.get("ui_language", "de")),
+                key="sidebar_language_selector",
+            )
+            st.session_state.ui_language = language_options[selected_language]
 
-        st.divider()
-        st.subheader(t("sidebar.target_subheader"))
-        target_ects = st.number_input(t("sidebar.target_ects"), min_value=0, max_value=60, value=30, step=1)
-        st.session_state.target_ects = target_ects
-        
-        # ==========================================
-        # Aufruf der Export-Komponente
-        # ==========================================
+            uploaded_file = st.file_uploader(
+                t("sidebar.upload_label"),
+                type=["csv", "xlsx", "xls"],
+                help=t("sidebar.upload_help")
+            )
+
+            if uploaded_file is not None:
+                # Only trigger processing if a new file is uploaded or state is empty
+                if st.session_state.raw_data is None or uploaded_file.name not in str(st.session_state.raw_data):
+                    with st.spinner(t("sidebar.parsing")):
+                        handle_file_upload(uploaded_file)
+            else:
+                # Reset state if file is removed
+                st.session_state.raw_data = None
+                st.session_state.processed_modules = []
+                st.session_state.conflicts = []
+                st.session_state.selected_modules = []
+                st.session_state.selected_course_bases = []
+
+        with st.container(border=True):
+            st.markdown(f"**{t('sidebar.section.settings')}**")
+            target_ects = st.number_input(t("sidebar.target_ects"), min_value=0, max_value=60, value=30, step=1)
+            st.session_state.target_ects = target_ects
+
         if st.session_state.processed_modules:
             st.divider()
             modules_for_export = st.session_state.get("selected_modules") or st.session_state.processed_modules
             render_export_section(modules_for_export)
 
 
-def render_dashboard(modules: List, target_ects: int) -> None:
+def render_dashboard(modules: List, target_ects: int, all_modules: List[Any]) -> None:
     """Render dashboard with key stats and analysis visuals."""
     st.subheader(t("dashboard.subheader"))
 
@@ -1333,72 +1593,125 @@ def render_dashboard(modules: List, target_ects: int) -> None:
         st.info(t("dashboard.no_modules"))
         return
 
+    st.caption(t("dashboard.caption"))
+
     total_ects = sum(m.ects for m in modules)
     total_modules = len(modules)
     unique_days = len(set(_weekday_label(m) for m in modules))
-    total_minutes = sum(m.duration_minutes for m in modules)
     total_pruefungen = sum(1 for m in modules if getattr(m, "ist_pruefung", False))
     conflict_pairs = find_time_conflicts(modules)
     selected_base_count = len({_module_group_title(m) for m in modules})
+    lessons_per_week, hours_per_week, observed_weeks = _lessons_per_week(modules)
+    absence_settings = _absence_settings()
+    absence_rules = _absence_rules_summary(absence_settings)
+    absence_selected_df = _absence_conflict_dataframe(modules, absence_settings)
+    absence_all_df = _absence_conflict_dataframe(all_modules, absence_settings)
+    absence_course_df = _absence_course_impact_dataframe(modules, absence_settings)
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric(t("dashboard.metric.ects"), total_ects, delta=total_ects - target_ects)
-    with col2:
-        st.metric(t("dashboard.metric.rows"), total_modules)
-    with col3:
-        st.metric(t("dashboard.metric.base_courses"), selected_base_count)
-    with col4:
-        st.metric(t("dashboard.metric.exams"), total_pruefungen)
+    with st.container(border=True):
+        st.markdown(f"**{t('dashboard.section.metrics')}**")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric(t("dashboard.metric.ects"), total_ects, delta=total_ects - target_ects)
+        with col2:
+            st.metric(t("dashboard.metric.rows"), total_modules)
+        with col3:
+            st.metric(t("dashboard.metric.base_courses"), selected_base_count)
+        with col4:
+            st.metric(t("dashboard.metric.exams"), total_pruefungen)
 
-    col5, col6 = st.columns(2)
-    with col5:
-        st.metric(t("dashboard.metric.weekdays"), unique_days)
-    with col6:
-        st.metric(t("dashboard.metric.lessons"), round(total_minutes / 45, 1))
+        col5, col6 = st.columns(2)
+        with col5:
+            st.metric(t("dashboard.metric.weekdays"), unique_days)
+        with col6:
+            st.metric(t("dashboard.metric.lessons"), lessons_per_week)
+            st.caption(t("dashboard.metric.lessons_caption", hours=hours_per_week, weeks=observed_weeks))
 
-    st.divider()
+        col7, col8 = st.columns(2)
+        with col7:
+            st.metric(t("dashboard.metric.absence_rules"), len(absence_rules))
+        with col8:
+            st.metric(t("dashboard.metric.absence_rows"), len(absence_selected_df))
+
+    with st.container(border=True):
+        st.markdown(f"**{t('dashboard.section.absence')}**")
+        if not absence_rules:
+            st.info(t("dashboard.absence.none"))
+        else:
+            st.caption(t("dashboard.absence.active"))
+            for rule in absence_rules:
+                st.markdown(f"- {rule}")
+
+            st.markdown(t("dashboard.absence.current_selection"))
+            if absence_selected_df.empty:
+                st.success(t("dashboard.absence.current_selection_none"))
+            else:
+                st.warning(t("dashboard.absence.current_selection_conflicts", count=len(absence_selected_df)))
+                st.dataframe(_style_absence_rows(absence_selected_df, c("reason")), hide_index=True, width="stretch")
+
+            st.markdown(t("dashboard.absence.course_impact_title"))
+            if absence_course_df.empty:
+                st.info(t("dashboard.absence.course_impact_none"))
+            else:
+                st.caption(t("dashboard.absence.course_impact_caption"))
+                st.dataframe(_style_risk_rows(absence_course_df), hide_index=True, width="stretch")
+
+            st.markdown(t("dashboard.absence.all_data"))
+            if absence_all_df.empty:
+                st.info(t("dashboard.absence.all_data_none"))
+            else:
+                st.caption(t("dashboard.absence.all_data_caption", count=len(absence_all_df)))
+                st.dataframe(absence_all_df.head(50), hide_index=True, width="stretch")
 
     overlap_summary = _calculate_module_overlap_summary(modules)
     exam_df = _calculate_exam_feasibility(modules)
     semester_timeline = _semester_timeline_figure(modules)
     daily_load = _daily_load_figure(modules)
 
-    chart_col1, chart_col2 = st.columns([1.2, 1])
-    with chart_col1:
-        fig = _weekday_bar_figure(modules)
-        if fig is not None:
-            st.plotly_chart(fig, use_container_width=True)
-    with chart_col2:
-        fig = _overlap_bar_figure(overlap_summary)
-        if fig is not None:
-            st.plotly_chart(fig, use_container_width=True)
+    with st.container(border=True):
+        st.markdown(f"**{t('dashboard.section.visuals')}**")
+        chart_col1, chart_col2 = st.columns([1.2, 1])
+        with chart_col1:
+            st.markdown(t("dashboard.chart.weekday_title"))
+            st.caption(t("dashboard.chart.weekday_caption"))
+            fig = _weekday_bar_figure(modules)
+            if fig is not None:
+                st.plotly_chart(fig, use_container_width=True)
+        with chart_col2:
+            st.markdown(t("dashboard.chart.overlap_title"))
+            st.caption(t("dashboard.chart.overlap_caption"))
+            fig = _overlap_bar_figure(overlap_summary)
+            if fig is not None:
+                st.plotly_chart(fig, use_container_width=True)
 
-    if semester_timeline is not None:
-        st.markdown(t("dashboard.section.semester_timeline"))
-        st.plotly_chart(semester_timeline, use_container_width=True)
+        if semester_timeline is not None:
+            st.markdown(t("dashboard.section.semester_timeline"))
+            st.caption(t("dashboard.chart.semester_caption"))
+            st.plotly_chart(semester_timeline, use_container_width=True)
 
-    if daily_load is not None:
-        st.markdown(t("dashboard.section.daily_load"))
-        st.plotly_chart(daily_load, use_container_width=True)
+        if daily_load is not None:
+            st.markdown(t("dashboard.section.daily_load"))
+            st.caption(t("dashboard.chart.daily_load_caption"))
+            st.plotly_chart(daily_load, use_container_width=True)
 
-    st.markdown(t("dashboard.section.kpis"))
-    summary_table = pd.DataFrame(
-        [
-            {c("metric"): t("dashboard.kpi.conflict_pairs"), c("value"): len(conflict_pairs)},
-            {c("metric"): t("dashboard.kpi.modules_overlap"), c("value"): int((overlap_summary[c("overlap_total_min")] > 0).sum()) if not overlap_summary.empty else 0},
-            {c("metric"): t("dashboard.kpi.avg_overlap"), c("value"): round(overlap_summary[c("overlap_total_min")].mean(), 1) if not overlap_summary.empty else 0},
-        ]
-    )
-    st.dataframe(summary_table, hide_index=True, width="stretch")
+    with st.container(border=True):
+        st.markdown(t("dashboard.section.kpis"))
+        summary_table = pd.DataFrame(
+            [
+                {c("metric"): t("dashboard.kpi.conflict_pairs"), c("value"): len(conflict_pairs)},
+                {c("metric"): t("dashboard.kpi.modules_overlap"), c("value"): int((overlap_summary[c("overlap_total_min")] > 0).sum()) if not overlap_summary.empty else 0},
+                {c("metric"): t("dashboard.kpi.avg_overlap"), c("value"): round(overlap_summary[c("overlap_total_min")].mean(), 1) if not overlap_summary.empty else 0},
+            ]
+        )
+        st.dataframe(summary_table, hide_index=True, width="stretch")
 
-    if not exam_df.empty:
-        st.markdown(t("dashboard.section.exam_status"))
-        st.dataframe(exam_df, hide_index=True, width="stretch")
+        if not exam_df.empty:
+            st.markdown(t("dashboard.section.exam_status"))
+            st.dataframe(exam_df, hide_index=True, width="stretch")
 
-    if not overlap_summary.empty:
-        st.markdown(t("dashboard.section.overlap_rate"))
-        st.dataframe(overlap_summary, hide_index=True, width="stretch")
+        if not overlap_summary.empty:
+            st.markdown(t("dashboard.section.overlap_rate"))
+            st.dataframe(overlap_summary, hide_index=True, width="stretch")
 
 def render_timetable(modules: List) -> None:
     """Render a visual weekly schedule with timeline and daily breakdown."""
@@ -1408,92 +1721,145 @@ def render_timetable(modules: List) -> None:
         st.warning(t("timetable.no_modules"))
         return
 
-    st.caption(t("timetable.caption"))
-    fig = _weekly_timeline_figure(modules)
-    if fig is not None:
-        st.plotly_chart(fig, use_container_width=True)
+    with st.container(border=True):
+        st.caption(t("timetable.caption"))
+        fig = _weekly_timeline_figure(modules)
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True)
 
-    day_order = _weekday_labels_in_order()
-    for day in day_order:
-        daily_mods = sorted([m for m in modules if _weekday_label(m) == day], key=lambda x: x.startzeit)
-        if not daily_mods:
-            continue
+    with st.container(border=True):
+        st.markdown(f"**{t('timetable.section.daily_details')}**")
+        settings = _absence_settings()
+        blocked_days = settings.get("blocked_days", set()) if settings.get("blocked_enabled") else set()
+        day_order = _weekday_labels_in_order()
+        for day in day_order:
+            daily_mods = sorted([m for m in modules if _weekday_label(m) == day], key=lambda x: x.startzeit)
+            day_key = _weekday_keys_in_order()[day_order.index(day)]
+            day_blocked = day_key in blocked_days
+            if not daily_mods and not day_blocked:
+                continue
 
-        with st.expander(t("timetable.day_expander", day=day, count=len(daily_mods)), expanded=False):
-            for mod in daily_mods:
-                exam_tag = f" | {t('timetable.exam_tag')}" if getattr(mod, "ist_pruefung", False) else ""
-                st.markdown(
-                    f"**{mod.startzeit.strftime('%H:%M')} - {mod.endzeit.strftime('%H:%M')}**"
-                    f" | {mod.modulname}{exam_tag}"
-                )
-                st.caption(
-                    t(
-                        "timetable.entry_caption",
-                        module_no=getattr(mod, "modul_nr", None) or t("common.na"),
-                        course_no=getattr(mod, "kurs_nr", None) or t("common.na"),
-                        mod_type=mod.modultyp,
-                        room=mod.raum,
+            with st.expander(t("timetable.day_expander", day=day, count=len(daily_mods)), expanded=day_blocked):
+                if day_blocked:
+                    st.error(t("timetable.blocked_day_warning", halfday=settings.get("blocked_halfday", t("guided.full_day"))))
+
+                for mod in daily_mods:
+                    exam_tag = f" | {t('timetable.exam_tag')}" if getattr(mod, "ist_pruefung", False) else ""
+                    reasons = _absence_reasons_for_module(mod, settings)
+                    prefix = "🔴 " if reasons else ""
+                    st.markdown(
+                        f"{prefix}**{mod.startzeit.strftime('%H:%M')} - {mod.endzeit.strftime('%H:%M')}**"
+                        f" | {mod.modulname}{exam_tag}"
                     )
-                )
+                    st.caption(
+                        t(
+                            "timetable.entry_caption",
+                            module_no=getattr(mod, "modul_nr", None) or t("common.na"),
+                            course_no=getattr(mod, "kurs_nr", None) or t("common.na"),
+                            mod_type=mod.modultyp,
+                            room=mod.raum,
+                        )
+                    )
+                    if reasons:
+                        st.caption(t("timetable.absence_reason", reason=", ".join(reasons)))
 
-def render_conflict_analysis(conflicts: List[Tuple]) -> None:
+def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any], all_modules: List[Any]) -> None:
     """Render detailed conflict tables and feasibility analysis."""
     st.subheader(t("conflicts.subheader"))
 
-    if not st.session_state.selected_modules and not conflicts:
+    absence_settings = _absence_settings()
+    absence_selected_df = _absence_conflict_dataframe(selected_modules, absence_settings)
+    absence_all_df = _absence_conflict_dataframe(all_modules, absence_settings)
+    absence_course_df = _absence_course_impact_dataframe(selected_modules, absence_settings)
+
+    if not selected_modules and not conflicts and absence_all_df.empty:
         st.info(t("conflicts.empty_hint"))
         return
 
-    if not conflicts:
-        st.success(t("conflicts.none"))
-        st.balloons()
-        return
+    if conflicts:
+        st.error(t("conflicts.found", count=len(conflicts)))
+    else:
+        if absence_selected_df.empty:
+            st.success(t("conflicts.none"))
+        else:
+            st.warning(t("conflicts.none_time_but_absence"))
 
-    conflict_summary_df = _summarize_conflicts(conflicts)
-    conflict_rows = []
-    for left, right in conflicts:
-        overlap = _minutes_overlap(left, right)
-        left_duration = max(1, left.duration_minutes)
-        right_duration = max(1, right.duration_minutes)
-        conflict_rows.append(
-            {
-                c("date"): _conflict_date_label(left),
-                c("weekday"): _weekday_label(left),
-                c("module_1"): _module_label(left),
-                c("module_2"): _module_label(right),
-                c("time_1"): f"{left.startzeit.strftime('%H:%M')} - {left.endzeit.strftime('%H:%M')}",
-                c("time_2"): f"{right.startzeit.strftime('%H:%M')} - {right.endzeit.strftime('%H:%M')}",
-                c("overlap_min"): overlap,
-                c("overlap_pct_module_1"): round((overlap / left_duration) * 100, 1),
-                c("overlap_pct_module_2"): round((overlap / right_duration) * 100, 1),
-            }
-        )
+    if conflicts:
+        conflict_summary_df = _summarize_conflicts(conflicts)
+        conflict_rows = []
+        for left, right in conflicts:
+            overlap = _minutes_overlap(left, right)
+            left_duration = max(1, left.duration_minutes)
+            right_duration = max(1, right.duration_minutes)
+            conflict_rows.append(
+                {
+                    c("date"): _conflict_date_label(left),
+                    c("weekday"): _weekday_label(left),
+                    c("module_1"): _module_label(left),
+                    c("module_2"): _module_label(right),
+                    c("time_1"): f"{left.startzeit.strftime('%H:%M')} - {left.endzeit.strftime('%H:%M')}",
+                    c("time_2"): f"{right.startzeit.strftime('%H:%M')} - {right.endzeit.strftime('%H:%M')}",
+                    c("overlap_min"): overlap,
+                    c("overlap_pct_module_1"): round((overlap / left_duration) * 100, 1),
+                    c("overlap_pct_module_2"): round((overlap / right_duration) * 100, 1),
+                }
+            )
 
-    conflict_df = pd.DataFrame(conflict_rows).sort_values([c("date"), c("overlap_min"), c("weekday")], ascending=[True, False, True])
-    st.error(t("conflicts.found", count=len(conflicts)))
+        conflict_df = pd.DataFrame(conflict_rows).sort_values([c("date"), c("overlap_min"), c("weekday")], ascending=[True, False, True])
 
-    if not conflict_summary_df.empty:
-        st.markdown(t("conflicts.summary_title"))
-        st.dataframe(conflict_summary_df, hide_index=True, width="stretch")
+        with st.container(border=True):
+            if not conflict_summary_df.empty:
+                st.markdown(t("conflicts.summary_title"))
+                st.dataframe(conflict_summary_df, hide_index=True, width="stretch")
 
-    st.markdown(t("conflicts.details_title"))
-    st.dataframe(conflict_df, hide_index=True, width="stretch")
+            if not conflict_df.empty:
+                top_conflicts = conflict_df.head(8).copy()
+                fig = px.bar(
+                    top_conflicts,
+                    x=c("overlap_min"),
+                    y=c("module_1"),
+                    color=c("module_2"),
+                    orientation="h",
+                    title=t("chart.conflict_top"),
+                )
+                fig.update_layout(height=max(420, 44 * len(top_conflicts) + 120), margin=dict(l=10, r=10, t=40, b=10))
+                st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown(t("conflicts.interpretation_title"))
-    st.caption(t("conflicts.interpretation_text"))
+                by_day = conflict_df.groupby(c("weekday"), as_index=False)[c("overlap_min")].sum()
+                fig_day = px.pie(by_day, values=c("overlap_min"), names=c("weekday"), title=t("conflicts.chart.by_weekday"))
+                fig_day.update_layout(height=360, margin=dict(l=10, r=10, t=40, b=10))
+                st.plotly_chart(fig_day, use_container_width=True)
 
-    if not conflict_df.empty:
-        top_conflicts = conflict_df.head(6).copy()
-        fig = px.bar(
-            top_conflicts,
-            x=c("overlap_min"),
-            y=c("module_1"),
-            color=c("module_2"),
-            orientation="h",
-            title=t("chart.conflict_top"),
-        )
-        fig.update_layout(height=max(320, 40 * len(top_conflicts) + 100), margin=dict(l=10, r=10, t=40, b=10))
-        st.plotly_chart(fig, use_container_width=True)
+                by_date = conflict_df.groupby(c("date"), as_index=False)[c("overlap_min")].sum()
+                fig_date = px.bar(by_date, x=c("date"), y=c("overlap_min"), title=t("conflicts.chart.by_date"))
+                fig_date.update_layout(height=340, margin=dict(l=10, r=10, t=40, b=10))
+                st.plotly_chart(fig_date, use_container_width=True)
+
+        with st.container(border=True):
+            st.markdown(t("conflicts.details_title"))
+            st.dataframe(conflict_df.style.background_gradient(subset=[c("overlap_min")], cmap="Reds"), hide_index=True, width="stretch")
+            st.markdown(t("conflicts.interpretation_title"))
+            st.caption(t("conflicts.interpretation_text"))
+
+    with st.container(border=True):
+        st.markdown(t("conflicts.absence_title"))
+        if absence_all_df.empty:
+            st.info(t("conflicts.absence_none"))
+        else:
+            if absence_selected_df.empty:
+                st.success(t("conflicts.absence_selected_none"))
+            else:
+                st.warning(t("conflicts.absence_selected_found", count=len(absence_selected_df)))
+                st.dataframe(_style_absence_rows(absence_selected_df, c("reason")), hide_index=True, width="stretch")
+
+            st.markdown(t("conflicts.absence_course_title"))
+            if absence_course_df.empty:
+                st.info(t("conflicts.absence_course_none"))
+            else:
+                st.dataframe(_style_risk_rows(absence_course_df), hide_index=True, width="stretch")
+
+            st.caption(t("conflicts.absence_all_caption", count=len(absence_all_df)))
+            st.dataframe(_style_absence_rows(absence_all_df.head(80), c("reason")), hide_index=True, width="stretch")
 
 def render_raw_data() -> None:
     """Displays source data and a cleaned, student-friendly raw view."""
@@ -1510,17 +1876,20 @@ def render_raw_data() -> None:
 
     col1, col2 = st.columns([1.1, 0.9])
     with col1:
-        st.markdown(t("raw.original"))
-        st.dataframe(raw_df, width="stretch", hide_index=True)
+        with st.container(border=True):
+            st.markdown(t("raw.original"))
+            st.dataframe(raw_df, width="stretch", hide_index=True)
 
     with col2:
-        st.markdown(t("raw.help_title"))
-        st.write(t("raw.help_text"))
+        with st.container(border=True):
+            st.markdown(t("raw.help_title"))
+            st.write(t("raw.help_text"))
 
         if st.session_state.get("selected_modules"):
-            st.markdown(t("raw.selected"))
-            sel_df = pd.DataFrame([_module_to_ui_row(m) for m in st.session_state.selected_modules])
-            st.dataframe(sel_df, width="stretch", hide_index=True)
+            with st.container(border=True):
+                st.markdown(t("raw.selected"))
+                sel_df = pd.DataFrame([_module_to_ui_row(m) for m in st.session_state.selected_modules])
+                st.dataframe(sel_df, width="stretch", hide_index=True)
 
 # ==========================================
 # 5. MAIN APPLICATION CONTROLLER
@@ -1536,6 +1905,10 @@ def main() -> None:
 
     st.title(t("app.title"))
     st.markdown(t("app.subtitle"))
+
+    with st.container(border=True):
+        st.markdown(f"**{t('app.quickstart_title')}**")
+        st.caption(t("app.quickstart_text"))
 
     selected_modules = st.session_state.processed_modules
 
@@ -1553,7 +1926,7 @@ def main() -> None:
     
     # Render Content in Tabs
     with tab_dashboard:
-        render_dashboard(selected_modules, st.session_state.get('target_ects', 30))
+        render_dashboard(selected_modules, st.session_state.get('target_ects', 30), st.session_state.processed_modules)
         
     with tab_timetable:
         if selected_modules:
@@ -1564,9 +1937,9 @@ def main() -> None:
     with tab_conflicts:
         if selected_modules:
             selected_conflicts = find_time_conflicts(selected_modules)
-            render_conflict_analysis(selected_conflicts)
+            render_conflict_analysis(selected_conflicts, selected_modules, st.session_state.processed_modules)
         else:
-            st.info(t("app.info.no_selection_conflicts"))
+            render_conflict_analysis([], selected_modules, st.session_state.processed_modules)
             
     with tab_data:
         render_raw_data()

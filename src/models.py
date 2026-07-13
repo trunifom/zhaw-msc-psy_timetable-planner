@@ -85,6 +85,12 @@ class ZHAWModule(BaseModel):
         default=False,
         description="True if this row represents an exam event."
     )
+    anwesenheitspflicht_prozent: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Optional required attendance percentage (0-100)."
+    )
     
     wochentag: Weekday = Field(
         ..., 
@@ -252,6 +258,21 @@ class ZHAWModule(BaseModel):
         if value in {"1", "true", "ja", "yes", "pruefung", "prüfung", "exam"}:
             return True
         return False
+
+    @field_validator('anwesenheitspflicht_prozent', mode='before')
+    @classmethod
+    def parse_attendance_percentage(cls, v: Any) -> float | None:
+        """Parse attendance requirement values like '80%', '0.8', or '80'."""
+        if v is None:
+            return None
+        value = str(v).strip().replace(",", ".")
+        if value.lower() in {"", "n/a", "na", "none", "nan"}:
+            return None
+        value = value.replace("%", "")
+        parsed = float(value)
+        if 0 <= parsed <= 1:
+            parsed *= 100
+        return parsed
 
     @model_validator(mode='after')
     def validate_time_logic(self) -> 'ZHAWModule':

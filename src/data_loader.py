@@ -72,6 +72,7 @@ OPTIONAL_COLUMNS = {
     "kurs_nr",
     "pruefung_flag",
     "ist_pruefung",
+    "anwesenheitspflicht_prozent",
 }
 
 # Map common upload header variants to the canonical internal schema.
@@ -118,6 +119,11 @@ COLUMN_ALIASES = {
     },
     "ist_pruefung": {
         "ist_pruefung", "is_exam", "exam_flag"
+    },
+    "anwesenheitspflicht_prozent": {
+        "anwesenheit", "anwesenheitspflicht", "anwesenheitspflicht_prozent", "anwesenheitspflicht_%",
+        "praesenz", "praesenzpflicht", "attendance", "attendance_requirement", "attendance_required",
+        "presence", "presence_requirement", "mandatory_attendance"
     },
 }
 
@@ -310,6 +316,13 @@ def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
             parsed_dates = parsed_iso.combine_first(parsed_local)
             df["datum"] = parsed_dates.dt.date
+
+        if "anwesenheitspflicht_prozent" in df.columns:
+            raw = df["anwesenheitspflicht_prozent"].astype(str).str.strip().str.replace(",", ".", regex=False)
+            raw = raw.str.replace("%", "", regex=False)
+            numeric = pd.to_numeric(raw, errors="coerce")
+            numeric = numeric.where((numeric < 0) | (numeric > 1), numeric * 100)
+            df["anwesenheitspflicht_prozent"] = numeric
 
         # Drop obvious non-data rows (blank lines, repeated header labels, metadata rows).
         required_like = [c for c in ["modulname", "wochentag", "startzeit", "endzeit"] if c in df.columns]
