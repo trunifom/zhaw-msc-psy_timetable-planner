@@ -4,11 +4,33 @@ Author: HealthData CodeArchitect
 Description: Robust data ingestion, validation, and transformation module.
 Focuses on defensive programming to ensure high UI/UX stability by catching
 and correcting data anomalies before they reach the presentation layer.
+
+Pipeline overview (see `load_schedule_from_dataframe` for the entry point):
+    raw DataFrame (from st.file_uploader via pandas)
+        -> _try_reheader_from_rows   find & promote the real header row,
+                                      skipping title/note banner rows that
+                                      real ZHAW exports place above it
+        -> _normalize_columns        map many header spellings (German/
+                                      English, with/without umlauts) onto
+                                      one canonical internal schema
+        -> _sanitize_dataframe       coerce types, parse dates/times/%,
+                                      drop obviously-junk rows
+        -> ZHAWModule(**row)         final strict validation (models.py),
+                                      one row at a time so a single bad
+                                      row doesn't sink the whole import
+
+This tolerance is deliberate: real university timetable exports are messy
+(merged header cells, metadata banners, inconsistent date formats, stray
+whitespace) and a student uploading their own file should get as much of
+their schedule imported as possible rather than a hard failure on the
+first oddity - errors here should degrade gracefully to "skip this row,
+warn about it" rather than "reject the whole file".
 """
 
 import pandas as pd
 import logging
 import re
+from datetime import date, datetime
 from typing import List, Dict, Any
 from pydantic import ValidationError
 
@@ -162,6 +184,26 @@ def _canonicalize_header_labels(labels: List[Any]) -> List[str]:
 def _try_reheader_from_rows(df: pd.DataFrame, max_scan_rows: int = 20) -> pd.DataFrame:
     """
     Detect and promote a row to header when spreadsheet exports contain metadata lines.
+
+    Real ZHAW exports are read with `header=None` (see app.py's Excel
+    branch) so this function always sees the *raw* grid, including things
+    like a title banner ("Vorlesungsverzeichnis Master HS 2026 ...") and a
+    yellow note row above the real column header. This function scans the
+    first `max_scan_rows` rows looking for the row that best matches our
+    expected column names, and promotes it to be the DataFrame header,
+    discarding everything above it.
+
+    Two scoring passes run per row index:
+      - "required hits": how many of the 3 columns we absolutely need to
+        even recognize a timetable (wochentag/startzeit/endzeit) this row
+        contains, when normalized/alias-mapped.
+      - "total hits": same but across the full required+optional schema,
+        used as a tiebreaker once required hits are equal.
+    The moment a row hits ALL required columns and >=3 total columns, it's
+    accepted immediately as a confident match. If no row is ever that
+    confident (e.g. an export with unusual headers), the single
+    best-scoring row seen across the whole scan is used instead as a
+    lenient fallback, as long as it clears a low minimum bar.
     """
     if df.empty:
         return df
@@ -182,7 +224,10 @@ def _try_reheader_from_rows(df: pd.DataFrame, max_scan_rows: int = 20) -> pd.Dat
         # Candidate 1: this row alone is the header.
         candidates.append((evaluate_headers(row_values), idx + 1))
 
-        # Candidate 2: two-line header (common in exports with merged cells).
+        # Candidate 2: two-line header (common in exports with merged cells,
+        # e.g. "Kurs" on one line and "Nr." directly below it forming
+        # "Kurs Nr." together) - concatenate row idx and idx+1 cell-by-cell
+        # and treat the combination as one more header candidate.
         if idx + 1 < scan_limit:
             next_values = df.iloc[idx + 1].tolist()
             combined_values = []
@@ -198,6 +243,9 @@ def _try_reheader_from_rows(df: pd.DataFrame, max_scan_rows: int = 20) -> pd.Dat
             required_hits = len(HEADER_REQUIRED_COLUMNS & candidate_set)
             total_hits = len((REQUIRED_COLUMNS | OPTIONAL_COLUMNS) & candidate_set)
 
+            # Track the best candidate seen so far, in case no row ever
+            # reaches the "confident match" bar below and we must fall
+            # back to the least-bad guess.
             if (
                 required_hits > best_required_hits
                 or (required_hits == best_required_hits and total_hits > best_total_hits)
@@ -207,6 +255,9 @@ def _try_reheader_from_rows(df: pd.DataFrame, max_scan_rows: int = 20) -> pd.Dat
                 best_required_hits = required_hits
                 best_total_hits = total_hits
 
+            # Confident match: all 3 required columns present, plus enough
+            # optional columns to be sure this is a real header and not a
+            # data row that coincidentally contains e.g. the word "Montag".
             is_header_candidate = HEADER_REQUIRED_COLUMNS.issubset(candidate_set) and total_hits >= 3
             if is_header_candidate:
                 logger.info(f"Detected header row at index {idx}. Rebuilding dataframe header.")
@@ -263,6 +314,52 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def _parse_datum_cell(value: Any) -> Any:
+    """
+    Parse a single 'datum' cell robustly, preserving native Excel date
+    values instead of round-tripping them through str() (which is lossy
+    and can make otherwise-valid dates unparseable). Falls back to
+    interpreting a bare number as a raw Excel date serial, which can leak
+    through when a date column loses its cell formatting during import.
+    """
+    if value is None:
+        return pd.NaT
+    if isinstance(value, float) and pd.isna(value):
+        return pd.NaT
+    if isinstance(value, pd.Timestamp):
+        return value
+    if isinstance(value, (datetime, date)):
+        return pd.Timestamp(value)
+
+    text = str(value).strip().replace("\xa0", " ")  # \xa0 = non-breaking space, common in Excel exports
+    if text.lower() in {"", "n/a", "na", "none", "nan", "nat"}:
+        return pd.NaT
+
+    # ISO-like strings ("2026-09-16" or "2026-09-16 00:00:00") are parsed
+    # without `dayfirst`, since "YYYY-MM-DD" is unambiguous either way and
+    # forcing dayfirst on an already-ISO string can misparse edge cases.
+    if re.match(r"^\d{4}-\d{2}-\d{2}(?:[ T].*)?$", text):
+        return pd.to_datetime(text, errors="coerce")
+
+    # Everything else is assumed day-first (Swiss/German convention:
+    # "16.09.2026" or "16/09/2026" means 16 September, not 9 January).
+    parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
+    if pd.isna(parsed) and re.match(r"^\d{4,6}(\.0+)?$", text):
+        # Neither ISO nor day-first parsing worked, but the value still
+        # looks like a bare number (e.g. "46007" or "46007.0"). This
+        # happens when a date-formatted Excel cell loses its number format
+        # during import and pandas hands us the raw serial number instead
+        # of a real date. Excel's day-0 is 1899-12-30 (not 1900-01-01) to
+        # compensate for Excel's historical "1900 is a leap year" bug, so
+        # that offset - not the epoch you'd naively expect - is required
+        # for the arithmetic below to land on the correct calendar date.
+        try:
+            parsed = pd.Timestamp("1899-12-30") + pd.to_timedelta(float(text), unit="D")
+        except (ValueError, OverflowError):
+            parsed = pd.NaT
+    return parsed
+
+
 def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
     Cleans and prepares data types before Pydantic validation.
@@ -305,17 +402,14 @@ def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                 df[col] = df[col].astype(str).str.strip()
 
         if "datum" in df.columns:
-            raw_dates = df["datum"].astype(str).str.strip()
-
-            # Parse ISO-like timestamps first to avoid day/month swapping.
-            iso_mask = raw_dates.str.match(r"^\d{4}-\d{2}-\d{2}(?:[ T].*)?$", na=False)
-            parsed_iso = pd.to_datetime(raw_dates.where(iso_mask), errors="coerce")
-
-            # Parse remaining values as day-first (e.g., 15.09.2026).
-            parsed_local = pd.to_datetime(raw_dates.where(~iso_mask), errors="coerce", dayfirst=True)
-
-            parsed_dates = parsed_iso.combine_first(parsed_local)
-            df["datum"] = parsed_dates.dt.date
+            # Parse cell-by-cell first (see _parse_datum_cell for why: it
+            # needs to see each cell's original type, e.g. a real datetime
+            # vs. a plain string, before anything gets coerced). The second
+            # pass just normalizes the resulting mixed Timestamp/NaT column
+            # down to plain `datetime.date` (or None), which is what
+            # `ZHAWModule.datum` expects.
+            df["datum"] = df["datum"].apply(_parse_datum_cell)
+            df["datum"] = pd.to_datetime(df["datum"], errors="coerce").dt.date
 
         if "anwesenheitspflicht_prozent" in df.columns:
             raw = df["anwesenheitspflicht_prozent"].astype(str).str.strip().str.replace(",", ".", regex=False)
@@ -345,7 +439,10 @@ def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                         keep_mask.append(False)
                         continue
 
-                # Remove rows that look like duplicated header rows inside the sheet.
+                # Remove rows that look like duplicated header rows inside the sheet
+                # (some exports repeat the header every time a new section/lecturer
+                # group starts, which would otherwise show up as one bogus module
+                # literally named "Modulname").
                 row_header_tokens = {_normalize_label(row.get(col)) for col in required_like}
                 if {"modulname", "wochentag", "startzeit", "endzeit"}.issubset(row_header_tokens):
                     keep_mask.append(False)
@@ -441,7 +538,14 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame) -> List[ZHAWModule]:
             processed_modules.append(module_obj)
             
         except ValidationError as ve:
-            # If only the optional date field fails, drop date and retry once.
+            # Graceful degradation: if `datum` is the *only* field that
+            # failed validation (e.g. a genuinely garbled date string that
+            # slipped past _parse_datum_cell), don't discard the whole row
+            # over one bad field - retry once with datum forced to None.
+            # The row still carries useful info (module name, time, room,
+            # ...) and the app surfaces a "N rows without a date" warning
+            # to the user (see app.py's _warn_if_dates_missing) so this
+            # degradation is visible rather than silent data loss.
             errors = ve.errors()
             locations = {err.get("loc", [None])[0] for err in errors if err.get("loc")}
             if locations == {"datum"}:
@@ -450,18 +554,31 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame) -> List[ZHAWModule]:
                 try:
                     module_obj = ZHAWModule(**row_dict)
                     processed_modules.append(module_obj)
+                    logger.info(f"Row {index + 1}: kept without a date (original 'datum' value failed to parse: {ve}).")
                     continue
                 except ValidationError:
-                    pass
+                    pass  # some other field also broke on retry - fall through and drop the row
 
+            # Any other validation failure (bad time format, missing name,
+            # end-time before start-time, ...) means the row can't be
+            # trusted at all, so it's dropped - but the whole import still
+            # continues with the remaining rows (see the "all rows failed"
+            # check below for the one case where we do give up entirely).
             validation_errors += 1
             if validation_errors <= validation_log_limit:
                 logger.warning(f"Row {index + 1} failed validation: {ve}. Skipping row.")
             else:
+                # Cap the number of individual warnings logged per import so a
+                # file with hundreds of bad rows doesn't flood the log output.
                 suppressed_validation_logs += 1
-        except Exception as e:
+        except Exception:
+            # Unlike the ValidationError branch above (an expected, already
+            # explained data-quality issue), reaching here means something
+            # we didn't anticipate went wrong - logger.exception() captures
+            # the full traceback, not just the message, since that's what
+            # actually makes an "unexpected" failure diagnosable later.
             validation_errors += 1
-            logger.error(f"Unexpected error parsing row {index + 1}: {e}")
+            logger.exception(f"Unexpected error parsing row {index + 1}.")
 
     # Summary logging
     if suppressed_validation_logs:

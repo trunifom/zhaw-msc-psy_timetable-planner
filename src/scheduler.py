@@ -1,10 +1,29 @@
 """
 ZHAW MSc Psychology - Timetable Planner (GUI Layer)
 Author: HealthData CodeArchitect
-Description: Main entry point for the Streamlit GUI. 
-Provides a highly interactive, error-resilient, and user-friendly interface 
+Description: Main entry point for the Streamlit GUI.
+Provides a highly interactive, error-resilient, and user-friendly interface
 for managing academic schedules. Built with strict separation of concerns,
 state management, and comprehensive error handling.
+
+*** IMPORTANT - read this before touching this file ***
+This module has two unrelated halves:
+
+  1. Lines ~21-90 (`_weekday_key` ... `find_time_conflicts`): the ACTIVE
+     conflict-detection logic, imported and used by `src/app.py` for the
+     "Konfliktanalyse" tab and the guided-planning module status. This is
+     the part that matters and is covered by tests/test_scheduler.py.
+
+  2. Everything below the "1. APPLICATION CONFIGURATION & STATE" banner
+     (`setup_page_config`, `init_session_state`, `render_sidebar`, the
+     `render_*` dashboard functions, and `main()`): a self-contained
+     EARLIER PROTOTYPE of a standalone Streamlit app. It is NOT imported
+     by anything - `src/app.py` is the real, current entry point (run via
+     `streamlit run src/app.py`, see README.md). This code only runs at
+     all if someone executes `python src/scheduler.py` / `streamlit run
+     src/scheduler.py` directly, which is not the documented/supported way
+     to start the app. It's kept here for reference rather than deleted,
+     but treat it as historical, not as something to extend.
 """
 
 import streamlit as st
@@ -17,20 +36,39 @@ from pydantic import ValidationError
 # Import the strictly validated domain model and enum from our data layer
 from models import ZHAWModule, Weekday
 
+# ==========================================
+# 0. ACTIVE CONFLICT-DETECTION LOGIC
+# (imported by src/app.py - this is the part of the file that is actually used)
+# ==========================================
+
 
 def _weekday_key(module: ZHAWModule) -> str:
-    """Return a normalized weekday key for robust comparison."""
+    """Return a normalized weekday key (e.g. "montag") for robust comparison."""
+    # `module.wochentag` is a `Weekday` enum member; `.value` gives the
+    # plain string. The getattr fallback also tolerates being handed a
+    # raw string directly (defensive, in case this is ever called with
+    # something other than a full ZHAWModule).
     value = getattr(module.wochentag, "value", module.wochentag)
     return str(value).strip().lower()
 
 
 def _to_minutes(value: time) -> int:
-    """Convert a time object to minutes since midnight."""
+    """Convert a time object to minutes since midnight (e.g. 08:15 -> 495)."""
     return value.hour * 60 + value.minute
 
 
 def _same_occurrence(left: ZHAWModule, right: ZHAWModule) -> bool:
-    """Return True when two rows refer to the same schedulable occurrence."""
+    """
+    Return True when two rows refer to the same schedulable occurrence,
+    i.e. they *could* conflict at all before we even look at the times.
+
+    If both rows carry a real `datum`, "same occurrence" means the exact
+    same calendar date - a Monday 08:00 lecture on 2026-09-14 does not
+    conflict with a different Monday 08:00 lecture on 2026-09-21, even
+    though both are "Monday mornings". Only when a date is missing on
+    either side do we fall back to comparing weekdays, which is a looser
+    check (assumes the module recurs on that weekday every week).
+    """
     left_date = getattr(left, "datum", None)
     right_date = getattr(right, "datum", None)
     if left_date is not None and right_date is not None:
@@ -39,7 +77,15 @@ def _same_occurrence(left: ZHAWModule, right: ZHAWModule) -> bool:
 
 
 def _semantic_signature(module: ZHAWModule) -> tuple:
-    """Stable signature to suppress exact duplicate rows in conflict results."""
+    """
+    Stable signature to suppress exact duplicate rows in conflict results.
+
+    Some source exports contain the literal same session twice (e.g. once
+    per "SG"/study-program variant). Two rows with an identical signature
+    describe the same real-world event, not two different modules that
+    happen to clash - so they must never be reported as a "conflict" with
+    each other (see the `left_signature == right_signature` skip below).
+    """
     return (
         getattr(module, "datum", None),
         _weekday_key(module),
@@ -54,13 +100,22 @@ def _semantic_signature(module: ZHAWModule) -> tuple:
 
 def find_time_conflicts(modules: Iterable[ZHAWModule]) -> list[tuple[ZHAWModule, ZHAWModule]]:
     """
-    Detect overlapping modules on the same weekday.
+    Detect overlapping modules (same date, or same weekday if undated).
+
+    This is an O(n^2) pairwise comparison - deliberately simple, since a
+    student's selected schedule is at most a few hundred rows, so the
+    quadratic cost is negligible and clarity/correctness matters far more
+    here than algorithmic cleverness.
 
     Returns:
-        list[tuple[ZHAWModule, ZHAWModule]]: Pairs of conflicting modules.
+        list[tuple[ZHAWModule, ZHAWModule]]: Pairs of conflicting modules,
+        each pair reported at most once (see `seen_pairs` below).
     """
     module_list = list(modules or [])
     conflicts: list[tuple[ZHAWModule, ZHAWModule]] = []
+    # Tracks (sorted) signature pairs already reported, so that if the same
+    # logical clash is reachable via more than one (i, j) index combination
+    # it still only ends up once in the result.
     seen_pairs: set[tuple[tuple, tuple]] = set()
 
     for i, left in enumerate(module_list):
@@ -68,18 +123,24 @@ def find_time_conflicts(modules: Iterable[ZHAWModule]) -> list[tuple[ZHAWModule,
         left_end = _to_minutes(left.endzeit)
         left_signature = _semantic_signature(left)
 
+        # Only compare against modules *after* this one in the list - every
+        # (left, right) pair is thus considered exactly once, and a module
+        # never gets checked against itself.
         for right in module_list[i + 1 :]:
             if not _same_occurrence(left, right):
                 continue
 
             right_signature = _semantic_signature(right)
             if left_signature == right_signature:
-                continue
+                continue  # identical row (duplicate data), not a real conflict
 
             right_start = _to_minutes(right.startzeit)
             right_end = _to_minutes(right.endzeit)
 
-            # Intervals [a,b) and [c,d) overlap iff a < d and c < b.
+            # Half-open interval overlap test: [a,b) and [c,d) overlap iff
+            # a < d and c < b. Using half-open intervals means a module
+            # ending exactly when another starts (e.g. 10:00-12:00 and
+            # 12:00-14:00) is correctly NOT flagged as a conflict.
             if left_start < right_end and right_start < left_end:
                 pair_key = tuple(sorted((left_signature, right_signature)))
                 if pair_key in seen_pairs:
@@ -89,6 +150,14 @@ def find_time_conflicts(modules: Iterable[ZHAWModule]) -> list[tuple[ZHAWModule,
 
     return conflicts
 
+
+# ==========================================
+# LEGACY / UNUSED CODE BELOW THIS POINT
+# ==========================================
+# Everything from here to the end of the file is an earlier, standalone
+# prototype Streamlit app - NOT imported by src/app.py and not part of the
+# app you get from `streamlit run src/app.py`. See the module docstring at
+# the top of this file for details. Kept for historical reference only.
 # ==========================================
 # 1. APPLICATION CONFIGURATION & STATE
 # ==========================================

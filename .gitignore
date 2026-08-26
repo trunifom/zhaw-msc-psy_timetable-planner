@@ -15,6 +15,10 @@ ENV/
 data/*
 !data/.gitkeep
 
+# data/real/ enthaelt die echte, persoenliche Excelliste des Nutzers.
+# Nie einchecken - eigenes .gitignore dort regelt den Inhalt im Detail.
+!data/real/
+
 # OS generierte Dateien
 .DS_Store
 Thumbs.db

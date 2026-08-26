@@ -1,6 +1,34 @@
-"""Simple i18n helper for UI text resources."""
+"""
+Simple i18n helper for UI text resources.
 
+Full conventions (naming, placeholders, how to add a language, the
+consistency checklist) are documented in docs/i18n-README.md - this
+docstring only covers the two lookup helpers below.
+
+Usage from src/app.py:
+    t(key, **kwargs)  -> get_text(current_language, key, **kwargs)   (plain UI text)
+    c(key)            -> t(f"col.{key}")                             (dataframe column labels)
+
+`TEXTS` is a flat dict-of-dicts: top level keyed by language code
+("de"/"en"/"fr"), each language a flat dict of "namespace.key" -> string.
+Every language block below is meant to define the exact same set of keys
+(only the values differ); if you add or rename a key, do it in all three
+blocks, or `get_text` will silently fall back to the German string (or the
+raw key itself) for that entry in the other languages - see below.
+"""
+
+import logging
 from typing import Dict
+
+# Same self-contained per-module logging pattern used throughout src/ (see
+# app.py's "0. LOGGING" section) - only ever visible in the terminal
+# running `streamlit run`, never in the app's UI itself.
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(_handler)
 
 TEXTS: Dict[str, Dict[str, str]] = {
     "de": {
@@ -23,6 +51,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "sidebar.language_option.de": "Deutsch",
         "sidebar.language_option.en": "English",
         "sidebar.language_option.fr": "Français",
+        "sidebar.theme_dark_toggle": "🌙 Dunkles Design",
+        "sidebar.theme_help": "Zwischen dunklem und hellem Erscheinungsbild wechseln.",
         "sidebar.upload_label": "Planungsdatei auswählen",
         "sidebar.upload_help": "Unterstützt CSV, XLS und XLSX aus dem ZHAW-Export.",
         "sidebar.parsing": "Datei wird geprüft und verarbeitet...",
@@ -38,6 +68,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "upload.validation_error": "Datenvalidierungsfehler: {error}",
         "upload.validation_hint": "Bitte prüfe das Format, besonders Startzeit/Endzeit (HH:MM).",
         "upload.unexpected_error": "Beim Verarbeiten ist ein unerwarteter Fehler aufgetreten: {error}",
+        "upload.dates_missing": "Achtung: Bei {count} Zeile(n) konnte kein Datum aus der Excelliste gelesen werden. Diese Termine erscheinen im Kalender-Export ohne genaues Datum.",
 
         "export.subheader": "📥 Export",
         "export.finalize_checkbox": "Planung abgeschlossen (Export freischalten)",
@@ -48,8 +79,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "export.download_excel": "📊 Stundenplan als Excel herunterladen",
         "export.download_excel_help": "Exportiert die aktuell ausgewählten Termine als XLSX.",
         "export.download_ics": "🗓️ Stundenplan als ICS herunterladen",
-        "export.download_ics_help": "Exportiert alle datierten Termine als Kalenderdatei (ICS).",
-        "export.ics_missing_dates": "Hinweis: {count} Termine ohne Datum wurden im ICS nicht exportiert.",
+        "export.download_ics_help": "Exportiert alle ausgewählten Termine als Kalenderdatei (ICS), inkl. Raum, Dozent:in, ECTS und Prüfungskennzeichnung.",
+        "export.ics_summary": "{count} Termine wurden in die ICS-Datei exportiert.",
+        "export.ics_missing_dates": "Achtung: {count} Termine hatten kein Datum in der Excelliste und wurden als ganztägiger Platzhalter-Termin exportiert. Bitte Datum manuell prüfen.",
         "export.error": "Export-Fehler: Datei konnte nicht erzeugt werden. ({error})",
 
         "guided.subheader": "🧭 Geführte Studienplanung",
@@ -160,6 +192,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "dashboard.chart.overlap_caption": "Hohe Werte zeigen Module, die häufig gleichzeitig stattfinden.",
         "dashboard.chart.semester_caption": "Zeitliche Lage aller datierten Termine über den Semesterverlauf.",
         "dashboard.chart.daily_load_caption": "Gesamtlast pro Datum in Minuten, hilfreich für Spitzenlast-Tage.",
+        "dashboard.chart.no_dated_rows": "Keine Termine mit Datum in der aktuellen Auswahl/Filterung vorhanden.",
 
         "timetable.subheader": "📅 Wochenplan",
         "timetable.no_modules": "Keine ausgewählten Termine verfügbar.",
@@ -209,6 +242,21 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.yaxis_items": "Termine",
         "chart.yaxis_minutes": "Minuten",
         "chart.daily_load_title": "Gesamte Vorlesungsdauer pro Datum",
+        "chart.settings_toggle": "🎨 Diagramm-Einstellungen",
+        "chart.settings_palette": "Farbpalette",
+        "chart.settings_color_scale": "Farbskala",
+        "chart.settings_weekday_filter": "Wochentage anzeigen",
+        "chart.settings_color_by": "Farbe nach",
+        "chart.settings_view_mode": "Ansicht",
+        "chart.palette.default": "Standard",
+        "chart.palette.pastel": "Pastell",
+        "chart.palette.vivid": "Kräftig",
+        "chart.palette.colorblind_safe": "Farbenblind-sicher",
+        "chart.palette.dark24": "Dunkel (24 Farben)",
+        "chart.color_by_module": "Modul",
+        "chart.color_by_type": "Modulart",
+        "chart.view_total": "Gesamt",
+        "chart.view_by_module": "Nach Modul aufgeschlüsselt",
 
         "absence.reason.period": "Abwesenheitszeitraum",
         "absence.reason.date": "Einzelner Fehltag",
@@ -314,6 +362,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "sidebar.language_option.de": "Deutsch",
         "sidebar.language_option.en": "English",
         "sidebar.language_option.fr": "Français",
+        "sidebar.theme_dark_toggle": "🌙 Dark theme",
+        "sidebar.theme_help": "Switch between dark and light appearance.",
         "sidebar.upload_label": "Choose planning file",
         "sidebar.upload_help": "Supports CSV, XLS, and XLSX exports from ZHAW.",
         "sidebar.parsing": "Validating and processing file...",
@@ -329,6 +379,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "upload.validation_error": "Data validation error: {error}",
         "upload.validation_hint": "Please verify the format, especially start/end time (HH:MM).",
         "upload.unexpected_error": "Unexpected error while processing: {error}",
+        "upload.dates_missing": "Note: {count} row(s) had no readable date in the Excel file. These items will appear in the calendar export without an exact date.",
 
         "export.subheader": "📥 Export",
         "export.finalize_checkbox": "Planning complete (unlock export)",
@@ -339,8 +390,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "export.download_excel": "📊 Download timetable as Excel",
         "export.download_excel_help": "Exports currently selected items as XLSX.",
         "export.download_ics": "🗓️ Download timetable as ICS",
-        "export.download_ics_help": "Exports all dated items as a calendar file (ICS).",
-        "export.ics_missing_dates": "Note: {count} items without date were not exported to ICS.",
+        "export.download_ics_help": "Exports all currently selected items as a calendar file (ICS), including room, lecturer, ECTS, and exam marking.",
+        "export.ics_summary": "{count} items were exported to the ICS file.",
+        "export.ics_missing_dates": "Note: {count} items had no date in the Excel file and were exported as an all-day placeholder. Please check the date manually.",
         "export.error": "Export error: Could not generate file. ({error})",
 
         "guided.subheader": "🧭 Guided Study Planning",
@@ -451,6 +503,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "dashboard.chart.overlap_caption": "Higher values indicate modules that frequently collide in time.",
         "dashboard.chart.semester_caption": "Temporal placement of all dated items across the semester.",
         "dashboard.chart.daily_load_caption": "Total load per date in minutes to identify peak days.",
+        "dashboard.chart.no_dated_rows": "No dated items in the current selection/filter.",
 
         "timetable.subheader": "📅 Weekly Schedule",
         "timetable.no_modules": "No selected items available.",
@@ -500,6 +553,21 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.yaxis_items": "Items",
         "chart.yaxis_minutes": "Minutes",
         "chart.daily_load_title": "Total scheduled duration per date",
+        "chart.settings_toggle": "🎨 Chart settings",
+        "chart.settings_palette": "Color palette",
+        "chart.settings_color_scale": "Color scale",
+        "chart.settings_weekday_filter": "Show weekdays",
+        "chart.settings_color_by": "Color by",
+        "chart.settings_view_mode": "View",
+        "chart.palette.default": "Default",
+        "chart.palette.pastel": "Pastel",
+        "chart.palette.vivid": "Vivid",
+        "chart.palette.colorblind_safe": "Colorblind-safe",
+        "chart.palette.dark24": "Dark (24 colors)",
+        "chart.color_by_module": "Module",
+        "chart.color_by_type": "Module type",
+        "chart.view_total": "Total",
+        "chart.view_by_module": "Split by module",
 
         "absence.reason.period": "Absence period",
         "absence.reason.date": "Specific absence date",
@@ -605,6 +673,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "sidebar.language_option.de": "Deutsch",
         "sidebar.language_option.en": "English",
         "sidebar.language_option.fr": "Français",
+        "sidebar.theme_dark_toggle": "🌙 Theme sombre",
+        "sidebar.theme_help": "Basculer entre l'apparence sombre et claire.",
         "sidebar.upload_label": "Choisir le fichier de planification",
         "sidebar.upload_help": "Prend en charge les exports ZHAW en CSV, XLS et XLSX.",
         "sidebar.parsing": "Verification et traitement du fichier...",
@@ -620,6 +690,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "upload.validation_error": "Erreur de validation des donnees : {error}",
         "upload.validation_hint": "Verifie le format, surtout l'heure de debut/fin (HH:MM).",
         "upload.unexpected_error": "Erreur inattendue pendant le traitement : {error}",
+        "upload.dates_missing": "Attention : {count} ligne(s) n'avaient pas de date lisible dans le fichier Excel. Ces elements apparaitront dans l'export calendrier sans date exacte.",
 
         "export.subheader": "📥 Export",
         "export.finalize_checkbox": "Planification terminee (activer l'export)",
@@ -630,8 +701,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "export.download_excel": "📊 Telecharger l'horaire en Excel",
         "export.download_excel_help": "Exporte les elements selectionnes au format XLSX.",
         "export.download_ics": "🗓️ Telecharger l'horaire en ICS",
-        "export.download_ics_help": "Exporte tous les elements dates en fichier calendrier (ICS).",
-        "export.ics_missing_dates": "Remarque : {count} elements sans date n'ont pas ete exportes en ICS.",
+        "export.download_ics_help": "Exporte tous les elements actuellement selectionnes en fichier calendrier (ICS), avec salle, enseignant·e, ECTS et marquage des examens.",
+        "export.ics_summary": "{count} elements ont ete exportes dans le fichier ICS.",
+        "export.ics_missing_dates": "Attention : {count} elements n'avaient pas de date dans le fichier Excel et ont ete exportes comme evenement de la journee entiere. Merci de verifier la date manuellement.",
         "export.error": "Erreur d'export : impossible de generer le fichier. ({error})",
 
         "guided.subheader": "🧭 Planification des etudes guidee",
@@ -742,6 +814,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "dashboard.chart.overlap_caption": "Des valeurs elevees indiquent des modules souvent simultanes.",
         "dashboard.chart.semester_caption": "Position temporelle de tous les elements dates pendant le semestre.",
         "dashboard.chart.daily_load_caption": "Charge totale par date en minutes pour identifier les jours les plus charges.",
+        "dashboard.chart.no_dated_rows": "Aucun element date dans la selection/le filtre actuel.",
 
         "timetable.subheader": "📅 Planning hebdomadaire",
         "timetable.no_modules": "Aucun element selectionne disponible.",
@@ -791,6 +864,21 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.yaxis_items": "Elements",
         "chart.yaxis_minutes": "Minutes",
         "chart.daily_load_title": "Duree totale des cours par date",
+        "chart.settings_toggle": "🎨 Parametres du graphique",
+        "chart.settings_palette": "Palette de couleurs",
+        "chart.settings_color_scale": "Echelle de couleurs",
+        "chart.settings_weekday_filter": "Jours affiches",
+        "chart.settings_color_by": "Couleur par",
+        "chart.settings_view_mode": "Vue",
+        "chart.palette.default": "Standard",
+        "chart.palette.pastel": "Pastel",
+        "chart.palette.vivid": "Vif",
+        "chart.palette.colorblind_safe": "Adapte au daltonisme",
+        "chart.palette.dark24": "Sombre (24 couleurs)",
+        "chart.color_by_module": "Module",
+        "chart.color_by_type": "Type de module",
+        "chart.view_total": "Total",
+        "chart.view_by_module": "Reparti par module",
 
         "absence.reason.period": "Periode d'absence",
         "absence.reason.date": "Date d'absence precise",
@@ -880,12 +968,34 @@ TEXTS: Dict[str, Dict[str, str]] = {
 
 
 def get_text(lang: str, key: str, **kwargs: object) -> str:
-    """Return localized text with fallback to German and then key."""
+    """
+    Return localized text with fallback to German and then key.
+
+    Three-step fallback chain, in order:
+      1. `TEXTS[lang][key]`      - the requested language, if the key exists there.
+      2. `TEXTS["de"][key]`      - German, treated as the "reference" language
+                                   that should always have every key.
+      3. `key` itself            - worst case, so the UI shows a readable-ish
+                                   placeholder like "export.summary" instead of
+                                   crashing when a key is missing everywhere.
+    `**kwargs` are applied via `str.format(...)` for placeholders like
+    "{count}"/"{error}" - any formatting error (e.g. a placeholder in the
+    translated string that the caller forgot to pass) is swallowed and the
+    unformatted text is returned rather than raising, since a slightly
+    wrong label is far less disruptive to the user than a crashed page.
+    """
     lang_pack = TEXTS.get(lang, {})
     text = lang_pack.get(key) or TEXTS["de"].get(key) or key
     if kwargs:
         try:
             return text.format(**kwargs)
         except Exception:
+            # A mismatch between the placeholders a translated string
+            # expects and the kwargs a caller actually passed is a genuine
+            # bug in this codebase (wrong key used, or i18n.py edited
+            # without updating the caller) - it must never crash the page
+            # for the end user, but it should absolutely show up somewhere
+            # a developer will see it during testing/dev.
+            logger.warning(f"get_text('{lang}', '{key}') formatting failed for kwargs={kwargs!r}; returning unformatted text.")
             return text
     return text

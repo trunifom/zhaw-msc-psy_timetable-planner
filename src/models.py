@@ -1,13 +1,28 @@
-
-### `src/models.py`
-
-
 """
 ZHAW MSc Psychology - Timetable Planner (Domain Models Layer)
 Author: HealthData CodeArchitect
-Description: Defines the core data structures using Pydantic V2. 
-Provides rigorous validation, type coercion, and sanitization to ensure 
+Description: Defines the core data structures using Pydantic V2.
+Provides rigorous validation, type coercion, and sanitization to ensure
 that the UI/UX layer receives exclusively flawless and strictly typed data.
+
+Role in the architecture (see README.md "Architektur"):
+    src/data_loader.py builds a raw pandas DataFrame from the uploaded
+    file, then converts each row into one `ZHAWModule` instance defined
+    here. Every downstream module (app.py, scheduler.py, export.py) only
+    ever works with validated `ZHAWModule` objects, never raw DataFrame
+    rows - this file is the single choke point where "messy spreadsheet
+    data" becomes "typed, guaranteed-consistent domain data".
+
+Key data-model assumption (confirmed against a real ZHAW export): one row
+in the source Excel/CSV is one concrete session of a course - i.e. it is
+expected to carry its own `datum` (date), not just a recurring weekday.
+Course sessions can and do move between different weekdays/times from
+week to week, so `datum` (while technically Optional, since some exports
+omit it) should be treated as "expected on every row" rather than "purely
+optional metadata". Code that consumes `ZHAWModule.datum` elsewhere in the
+app (see `src/export.py`) is written with this assumption in mind: a
+missing date is treated as a data gap to flag to the user, not a normal
+recurring-lecture pattern to expand into a weekly rule.
 """
 
 from typing import Optional, Any
@@ -42,10 +57,12 @@ class ZHAWModule(BaseModel):
     """
     
     # --- Pydantic V2 Configuration ---
-    # Automatically strip whitespace from strings and forbid extra fields
-    # to maintain a clean memory footprint.
+    # str_strip_whitespace: trims stray leading/trailing spaces from Excel cells.
+    # extra="ignore": source exports often carry extra columns we don't model
+    # (e.g. a "SG"/Studiengang column) - silently drop them instead of raising,
+    # so unrelated columns in a real export never break the import.
     model_config = ConfigDict(
-        str_strip_whitespace=True, 
+        str_strip_whitespace=True,
         extra="ignore",
         frozen=False  # Set to True if objects should be strictly immutable after creation
     )
@@ -199,9 +216,26 @@ class ZHAWModule(BaseModel):
 
     @field_validator('datum', mode='before')
     @classmethod
-    def parse_date_value(cls, v: str | date | datetime | None) -> date | None:
-        """Parse common date formats from timetable exports."""
+    def parse_date_value(cls, v: str | date | datetime | float | None) -> date | None:
+        """
+        Parse common date formats from timetable exports.
+
+        Runs in `mode='before'`, i.e. on the *raw* value coming out of
+        `data_loader._sanitize_dataframe` - which may be a real Python
+        date/datetime (from a genuinely date-typed Excel cell), a plain
+        string, or `pandas.NaT` (pandas' "missing datetime" sentinel) when
+        a cell couldn't be parsed upstream. Getting the NaT case wrong here
+        used to silently drop entire rows (not just the date) with a
+        confusing `TypeError` deep inside Pydantic - see the `v != v` guard
+        below and its comment for the full explanation.
+        """
         if v is None:
+            return None
+        if v != v:  # NaN/NaT sentinel: both signal "missing" via self-inequality.
+            # (pandas.NaT also satisfies isinstance(v, datetime), so this must be
+            # checked first - otherwise NaT.date() below returns NaT unchanged,
+            # which is not a valid `date` and made pydantic-core raise a
+            # TypeError instead of cleanly falling through to `datum=None`.)
             return None
         if isinstance(v, date) and not isinstance(v, datetime):
             return v
@@ -209,7 +243,7 @@ class ZHAWModule(BaseModel):
             return v.date()
         if isinstance(v, str):
             value = v.strip()
-            if value.lower() in {"", "n/a", "na", "none", "nan"}:
+            if value.lower() in {"", "n/a", "na", "none", "nan", "nat"}:
                 return None
 
             # Fast path for ISO-like datetime strings, e.g. "2026-11-05 00:00:00".
@@ -222,6 +256,8 @@ class ZHAWModule(BaseModel):
                 "%d.%m.%Y",
                 "%Y-%m-%d",
                 "%d/%m/%Y",
+                "%d.%m.%y",
+                "%d-%m-%Y",
                 "%Y-%m-%d %H:%M:%S",
                 "%Y-%m-%d %H:%M",
                 "%d.%m.%Y %H:%M:%S",
@@ -277,9 +313,13 @@ class ZHAWModule(BaseModel):
     @model_validator(mode='after')
     def validate_time_logic(self) -> 'ZHAWModule':
         """
-        Cross-field validation: Guarantees that a module's end time is always 
+        Cross-field validation: Guarantees that a module's end time is always
         strictly after its start time. This is critical for any calendar/timeline UI
         to prevent negative height calculations or rendering bugs.
+
+        Runs in `mode='after'` (unlike the field validators above), because
+        it needs both `startzeit` and `endzeit` to already be parsed `time`
+        objects at once - a single-field validator can't compare two fields.
         """
         # Convert time to total minutes for safe mathematical comparison
         start_minutes = self.startzeit.hour * 60 + self.startzeit.minute
@@ -290,8 +330,13 @@ class ZHAWModule(BaseModel):
                 f"Logical Error in '{self.modulname}': "
                 f"End time ({self.endzeit}) must be strictly after start time ({self.startzeit})."
             )
-            
-        # Infer exam rows from name/flag even if explicit flag is missing.
+
+        # Belt-and-braces exam detection: some source exports only mark an
+        # exam via the module title ("... / PRUEFUNG") or a free-text flag
+        # column, without ever setting a clean boolean/"ja" value that
+        # `parse_exam_boolean` above would catch. Catching it here as well
+        # means the UI's exam badge, reminders and calendar markers (see
+        # export.py) still work even for those looser source formats.
         title = (self.modulname or "").lower()
         flag = (self.pruefung_flag or "").lower()
         if ("pruefung" in title or "prüfung" in title or "pruefung" in flag or "prüfung" in flag):

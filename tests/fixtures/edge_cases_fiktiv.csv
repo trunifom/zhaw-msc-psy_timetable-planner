@@ -1,0 +1,4 @@
+Weekday,Start,End,Course,Credits,Date,Room,Lecturer,Art,Exam
+Montag,08:15,10:00,Testkurs Alpha,3,16.09.2026,R101,Fiktiv Test,Vorlesung,Nein
+tue,10:15,12:00,Testkurs Beta,2,2026-09-17,R102,Muster Beispiel,Seminar,nein
+Mi,13:10,14:50,Testkurs Gamma / Pruefung,0,,R103,N.N.,Pruefung,Ja
