@@ -119,6 +119,27 @@ if "ui_theme" not in st.session_state:
 if "sidebar_theme_toggle" in st.session_state:
     st.session_state.ui_theme = "dark" if st.session_state.sidebar_theme_toggle else "light"
 
+# Same fix, same reason, for the language selector: render_sidebar() (which
+# normally writes st.session_state.ui_language) runs much later in the
+# script, so without this, every t()-translated string positioned before
+# that point in the source - the sidebar header, the "Darstellung"/"Daten
+# und Sprache" card titles, the "Dunkles Design" toggle label - would keep
+# showing the *previous* language for one extra rerun after switching,
+# while everything after it (including the rest of the app, rendered once
+# render_sidebar() returns) already shows the new one. This was reported as
+# stray German/French labels stuck at the top of the sidebar right after
+# switching to English. The three option labels ("Deutsch"/"English"/
+# "Français") are identical across all three language blocks in TEXTS -
+# each language names itself and the others by their own endonym - so this
+# reverse mapping doesn't depend on which language happens to be active yet.
+_language_option_to_code = {
+    get_text("de", "sidebar.language_option.de"): "de",
+    get_text("de", "sidebar.language_option.en"): "en",
+    get_text("de", "sidebar.language_option.fr"): "fr",
+}
+if st.session_state.get("sidebar_language_selector") in _language_option_to_code:
+    st.session_state.ui_language = _language_option_to_code[st.session_state.sidebar_language_selector]
+
 # --- Design tokens -----------------------------------------------------
 # Single source of truth for every color used in the custom CSS below.
 # Two palettes (dark/light) sharing the same token *names* is what makes
@@ -341,8 +362,24 @@ def _inject_design_system_css() -> None:
         .stCheckbox p, .stRadio p, .stToggle p {{
             color: var(--zp-text) !important;
         }}
+        /* Buttons (download/export buttons especially) had the same
+           native-theme-instead-of-ours problem as the input widgets above:
+           unstyled, they fall back to Streamlit's own native button chrome,
+           whose background can end up dark regardless of this app's own
+           light/dark toggle - paired with dark button text, that reads as
+           an unreadable dark-on-dark button in light mode. Restyled with
+           the same tokens as inputs/cards so background and text always
+           swap together and stay readable in both themes. */
         .stButton button, .stDownloadButton button {{
+            background: var(--zp-surface) !important;
+            color: var(--zp-text) !important;
+            border: 1px solid var(--zp-border) !important;
             font-size: 0.9rem;
+        }}
+        .stButton button:hover, .stDownloadButton button:hover {{
+            background: var(--zp-surface-hover) !important;
+            border-color: var(--zp-accent) !important;
+            color: var(--zp-accent) !important;
         }}
 
         /* --- Metrics --------------------------------------------------- */
@@ -609,6 +646,12 @@ def _apply_chart_theme(fig):
         legend=dict(font_color=theme["text"]),
         xaxis=dict(gridcolor=theme["border"], zerolinecolor=theme["border"], linecolor=theme["border"]),
         yaxis=dict(gridcolor=theme["border"], zerolinecolor=theme["border"], linecolor=theme["border"]),
+        # Hover tooltips are a separate Plotly styling layer that doesn't
+        # inherit the top-level `font_color` above - without this, they'd
+        # keep Plotly's own default tooltip colors regardless of this app's
+        # theme (the docstring above already claimed hover text was themed;
+        # this is what actually makes that true).
+        hoverlabel=dict(bgcolor=theme["surface"], font_color=theme["text"], bordercolor=theme["border"]),
     )
     return fig
 
