@@ -444,6 +444,18 @@ def card(key: str, icon: str = "", title: str = "", subtitle: str = ""):
     empty `title` renders the card with no header row at all (just the
     bordered container), for cases where the surrounding code already
     provides its own heading.
+
+    Gotcha when migrating an old `st.markdown(t("..."))` section header into
+    a card title: several i18n strings (originally written for direct
+    `st.markdown()` calls, which parse markdown) still have a literal
+    "**...**" baked into the translated text for bolding. `title` here is
+    inserted as plain text inside an HTML <span> (see below), NOT run
+    through markdown, so passing one of those strings unmodified renders
+    the literal asterisks on screen - call `.strip("*")` on the translation
+    first (see the guided-planning/conflicts/raw-data card() calls in this
+    file for the pattern). This bit the "Wichtige Kennzahlen" dashboard
+    card during development; grep this file for `.strip("*")` before adding
+    a new card title to see whether the key you're using needs it too.
     """
     with st.container(border=True, key=f"zp-card-{key}"):
         if title:
@@ -1022,12 +1034,94 @@ def _absence_course_impact_dataframe(modules: List[Any], settings: dict[str, Any
     return df.sort_values([c("absence_pct"), c("absence_rows"), c("base_course")], ascending=[False, False, True])
 
 
+# Semantic row-tint colors for pandas Styler output, expressed as the same
+# CSS custom properties _inject_design_system_css() defines on :root (see
+# THEME_TOKENS). Browsers resolve var(...) inside an inline style="..."
+# attribute too (which is what df.style.apply(...) below produces), so
+# these tints automatically follow the active light/dark theme instead of
+# being pinned to whichever theme they were originally tuned against - the
+# same "success"/"warning"/"danger"/"info" vocabulary as badge() below,
+# just for whole table rows instead of a single inline pill.
+_ROW_TONE_COLORS = {
+    "success": "var(--zp-success-bg)",
+    "warning": "var(--zp-warning-bg)",
+    "danger": "var(--zp-danger-bg)",
+    "info": "var(--zp-info-bg)",
+}
+
+
+def _style_status_column(df: pd.DataFrame, status_col: str, tone_map: dict[str, str]) -> Any:
+    """
+    Tint every row's background according to one column's (already-
+    localized) status text, using the app's semantic status tones.
+
+    `tone_map` maps the exact, localized cell values that can appear in
+    `status_col` to one of "success"/"warning"/"danger"/"info" (see
+    _ROW_TONE_COLORS); any value not present in `tone_map` (including "")
+    gets no styling rather than raising. This is the reusable, whole-row
+    counterpart to badge() - built once here so every status-bearing table
+    in the app (guided-planning module status, exam feasibility, ...) gets
+    the same color treatment instead of each call site reinventing it.
+    """
+    def _row_style(row: pd.Series) -> list[str]:
+        tone = tone_map.get(str(row.get(status_col, "")))
+        color = _ROW_TONE_COLORS.get(tone)
+        return [f"background-color: {color}" if color else ""] * len(row)
+
+    return df.style.apply(_row_style, axis=1)
+
+
+# Matches matplotlib's "Reds" colormap endpoints (very light pink -> deep
+# red) closely enough for a severity ramp, without actually depending on
+# matplotlib - see _style_sequential_red() below for why that matters.
+_RED_RAMP_LOW = (255, 245, 240)
+_RED_RAMP_HIGH = (103, 0, 13)
+
+
+def _style_sequential_red(df: pd.DataFrame, value_col: str) -> Any:
+    """
+    Tint one column's cell backgrounds with a red intensity proportional to
+    that cell's value (linearly normalized across the column's own min..max,
+    same idea as a heatmap) - a sequential "how severe is this" encoding,
+    matching the color language _apply_chart_theme() already uses for the
+    equivalent charts (continuous "Reds" scale = higher number = worse).
+
+    This exists as a dependency-free replacement for pandas' built-in
+    `Styler.background_gradient(cmap="Reds")`: that method requires
+    matplotlib to resolve the named colormap, which is NOT a dependency of
+    this project (not in requirements.txt/environment.yaml) - calling it
+    raises `ImportError: background_gradient requires matplotlib.` the
+    first time a student's data actually reaches a table using it, not at
+    import time, so this was a real, previously-shipped, latent crash
+    (see docs/TESTING-README.md's regression-test notes) rather than a
+    theoretical concern. Every other Styler helper in this file
+    (_style_absence_rows, _style_risk_rows, _style_status_column) already
+    only emits plain CSS strings for exactly this reason.
+    """
+    values = df[value_col].astype(float)
+    vmin, vmax = values.min(), values.max()
+    span = (vmax - vmin) or 1.0  # avoid a division by zero when every value is identical
+
+    def _cell_color(value: Any) -> str:
+        ratio = max(0.0, min(1.0, (float(value) - vmin) / span))
+        r = round(_RED_RAMP_LOW[0] + ratio * (_RED_RAMP_HIGH[0] - _RED_RAMP_LOW[0]))
+        g = round(_RED_RAMP_LOW[1] + ratio * (_RED_RAMP_HIGH[1] - _RED_RAMP_LOW[1]))
+        b = round(_RED_RAMP_LOW[2] + ratio * (_RED_RAMP_HIGH[2] - _RED_RAMP_LOW[2]))
+        # The ramp's dark-red end is too dark for default (dark) cell text
+        # to stay readable against - switch to white past the midpoint,
+        # same "flip label color over a dark fill" rule any heatmap needs.
+        text_color = "white" if ratio > 0.5 else "black"
+        return f"background-color: rgb({r}, {g}, {b}); color: {text_color}"
+
+    return df.style.map(_cell_color, subset=[value_col])
+
+
 def _style_absence_rows(df: pd.DataFrame, reason_col: str) -> Any:
     """Style rows to highlight absence-related violations."""
     def _row_style(row: pd.Series) -> list[str]:
         has_reason = bool(str(row.get(reason_col, "")).strip())
         if has_reason:
-            return ["background-color: rgba(220, 38, 38, 0.24)"] * len(row)
+            return [f"background-color: {_ROW_TONE_COLORS['danger']}"] * len(row)
         return [""] * len(row)
 
     return df.style.apply(_row_style, axis=1)
@@ -1040,10 +1134,10 @@ def _style_risk_rows(df: pd.DataFrame) -> Any:
     def _row_style(row: pd.Series) -> list[str]:
         status = str(row.get(status_col, ""))
         if status == t("absence.risk.high"):
-            return ["background-color: rgba(220, 38, 38, 0.24)"] * len(row)
+            return [f"background-color: {_ROW_TONE_COLORS['danger']}"] * len(row)
         if status == t("absence.risk.ok"):
-            return ["background-color: rgba(34, 197, 94, 0.18)"] * len(row)
-        return ["background-color: rgba(234, 179, 8, 0.14)"] * len(row)
+            return [f"background-color: {_ROW_TONE_COLORS['success']}"] * len(row)
+        return [f"background-color: {_ROW_TONE_COLORS['warning']}"] * len(row)
 
     return df.style.apply(_row_style, axis=1)
 
@@ -1171,7 +1265,10 @@ def _module_to_row(module: Any, module_id: int, selected: bool) -> dict:
         c("course_no"): getattr(module, "kurs_nr", None) or "",
         c("module"): module.modulname,
         c("weekday"): _weekday_label(module),
-        c("date"): datum_value.strftime("%Y-%m-%d") if datum_value else "",
+        # None (not "") when there's no date, so st.column_config.DateColumn
+        # at the call site can render it as a clean blank cell instead of
+        # trying to parse an empty string as a date.
+        c("date"): datum_value.strftime("%Y-%m-%d") if datum_value else None,
         c("start"): module.startzeit.strftime("%H:%M"),
         c("end"): module.endzeit.strftime("%H:%M"),
         c("exam"): t("guided.yes") if getattr(module, "ist_pruefung", False) else t("guided.no"),
@@ -1789,7 +1886,10 @@ def _calculate_exam_feasibility(modules: List[Any]) -> pd.DataFrame:
             {
                 c("exam_name"): _module_label(exam),
                 c("module"): _module_group_title(exam),
-                c("date"): exam.datum.strftime("%Y-%m-%d") if getattr(exam, "datum", None) else "",
+                # None (not "") for a missing date - see _module_to_row for
+                # why: lets st.column_config.DateColumn render a blank cell
+                # instead of failing to parse an empty string.
+                c("date"): exam.datum.strftime("%Y-%m-%d") if getattr(exam, "datum", None) else None,
                 c("time"): f"{exam.startzeit.strftime('%H:%M')} - {exam.endzeit.strftime('%H:%M')}",
                 c("conflicts"): conflict_count,
                 c("status"): status,
@@ -2054,9 +2154,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     semester_start, semester_end = _semester_date_bounds(all_modules)
     absence_period_valid = True
 
-    with st.container(border=True):
-        st.markdown(t("guided.step1"))
-
+    with card("guided-step1", "🧭", t("guided.step1").strip("*")):
         if semester_start and semester_end:
             st.caption(
                 t(
@@ -2187,8 +2285,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         st.session_state.absence_blocked_days_values = blocked_days
         st.session_state.absence_blocked_halfday_value = blocked_halfday
 
-    with st.container(border=True):
-        st.markdown(t("guided.step2"))
+    with card("guided-step2", "🔍", t("guided.step2").strip("*")):
         modul_nr_search = st.text_input(
             t("guided.search.modul_nr"),
             placeholder=t("guided.search.modul_nr_placeholder"),
@@ -2538,7 +2635,17 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 
         if module_status_rows:
             st.markdown(t("guided.step5"))
-            st.dataframe(pd.DataFrame(module_status_rows), hide_index=True, width="stretch")
+            status_tones = {
+                t("guided.status.complete"): "success",
+                t("guided.status.incomplete"): "warning",
+                t("guided.status.complete_conflicts"): "warning",
+                t("guided.status.incomplete_conflicts"): "danger",
+            }
+            st.dataframe(
+                _style_status_column(pd.DataFrame(module_status_rows), c("status"), status_tones),
+                hide_index=True,
+                width="stretch",
+            )
 
     elif selection_mode == t("guided.mode.course"):
         # "course" mode: coarser-grained than "module" mode - groups purely
@@ -2648,6 +2755,17 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             ],
             column_config={
                 c("select"): st.column_config.CheckboxColumn(c("select")),
+                # Explicit typed columns instead of leaving these as plain
+                # text: consistent locale-aware formatting, right-alignment
+                # for the numeric column, and a narrower default width than
+                # a free-text column would get (this table gets wide fast
+                # with 12+ columns, so every column that doesn't need full
+                # text width helps keep it scannable without horizontal
+                # scrolling).
+                c("date"): st.column_config.DateColumn(c("date"), format="DD.MM.YYYY", width="small"),
+                c("start"): st.column_config.TimeColumn(c("start"), format="HH:mm", width="small"),
+                c("end"): st.column_config.TimeColumn(c("end"), format="HH:mm", width="small"),
+                c("ects"): st.column_config.NumberColumn(c("ects"), width="small"),
             },
             key="course_selector_editor",
         )
@@ -2681,8 +2799,7 @@ def render_sidebar() -> None:
         st.header(t("sidebar.header"))
         st.markdown(t("sidebar.description"))
 
-        with st.container(border=True):
-            st.markdown(f"**{t('sidebar.section.data')}**")
+        with card("sidebar-data", "📁", t("sidebar.section.data")):
             language_options = {
                 t("sidebar.language_option.de"): "de",
                 t("sidebar.language_option.en"): "en",
@@ -2739,8 +2856,7 @@ def render_sidebar() -> None:
                 st.session_state.selected_modules = []
                 st.session_state.selected_course_bases = []
 
-        with st.container(border=True):
-            st.markdown(f"**{t('sidebar.section.settings')}**")
+        with card("sidebar-settings", "🎯", t("sidebar.section.settings")):
             target_ects = st.number_input(t("sidebar.target_ects"), min_value=0, max_value=60, value=30, step=1)
             st.session_state.target_ects = target_ects
 
@@ -2795,6 +2911,16 @@ def render_dashboard(modules: List, target_ects: int, all_modules: List[Any]) ->
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric(t("dashboard.metric.ects"), total_ects, delta=total_ects - target_ects)
+            # A single-glance "how full is the semester" bar alongside the
+            # raw number/delta - the classic "workload balance" visual from
+            # student-planner apps (progress toward a goal is one of the
+            # few metrics here that's a pure 0..100% magnitude with one
+            # good direction, exactly what st.progress()/a ProgressColumn
+            # is for - unlike overlap%/absence% below, which are severity
+            # metrics and stay on the red-toned Styler treatment instead).
+            if target_ects > 0:
+                progress_ratio = min(total_ects / target_ects, 1.0)
+                st.progress(progress_ratio, text=t("dashboard.metric.ects_progress", pct=round(progress_ratio * 100)))
         with col2:
             st.metric(t("dashboard.metric.rows"), total_modules)
         with col3:
@@ -2918,7 +3044,7 @@ def render_dashboard(modules: List, target_ects: int, all_modules: List[Any]) ->
         else:
             st.info(t("dashboard.chart.no_dated_rows"))
 
-    with card("dash-kpis", "🧮", t("dashboard.section.kpis")):
+    with card("dash-kpis", "🧮", t("dashboard.section.kpis").strip("*")):
         summary_table = pd.DataFrame(
             [
                 {c("metric"): t("dashboard.kpi.conflict_pairs"), c("value"): len(conflict_pairs)},
@@ -2930,11 +3056,35 @@ def render_dashboard(modules: List, target_ects: int, all_modules: List[Any]) ->
 
         if not exam_df.empty:
             st.markdown(t("dashboard.section.exam_status"))
-            st.dataframe(exam_df, hide_index=True, width="stretch")
+            exam_status_tones = {
+                t("exam.status_ok"): "success",
+                t("exam.status_conflict"): "danger",
+                t("exam.status_unknown"): "warning",
+            }
+            st.dataframe(
+                _style_status_column(exam_df, c("status"), exam_status_tones),
+                hide_index=True,
+                width="stretch",
+                column_config={c("date"): st.column_config.DateColumn(c("date"), format="DD.MM.YYYY")},
+            )
 
         if not overlap_summary.empty:
             st.markdown(t("dashboard.section.overlap_rate"))
-            st.dataframe(overlap_summary, hide_index=True, width="stretch")
+            st.dataframe(
+                # Same sequential-red severity encoding as the detailed
+                # conflict table in render_conflict_analysis (higher
+                # overlap % = darker red) - one visual language for
+                # "how bad is this overlap" across every tab, not a
+                # different treatment per table.
+                _style_sequential_red(overlap_summary, c("overlap_pct")),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    c("duration_min"): st.column_config.NumberColumn(c("duration_min"), format="%d min"),
+                    c("overlap_total_min"): st.column_config.NumberColumn(c("overlap_total_min"), format="%d min"),
+                    c("overlap_pct"): st.column_config.NumberColumn(c("overlap_pct"), format="%.1f %%"),
+                },
+            )
 
 def render_timetable(modules: List) -> None:
     """
@@ -2957,14 +3107,13 @@ def render_timetable(modules: List) -> None:
         st.warning(t("timetable.no_modules"))
         return
 
-    with st.container(border=True):
+    with card("timetable-chart", "🗓️", t("timetable.section.chart")):
         st.caption(t("timetable.caption"))
         fig = _weekly_timeline_figure(modules)
         if fig is not None:
             st.plotly_chart(fig, use_container_width=True)
 
-    with st.container(border=True):
-        st.markdown(f"**{t('timetable.section.daily_details')}**")
+    with card("timetable-daily", "📋", t("timetable.section.daily_details")):
         settings = _absence_settings()
         blocked_days = settings.get("blocked_days", set()) if settings.get("blocked_enabled") else set()
         day_order = _weekday_labels_in_order()
@@ -2979,25 +3128,42 @@ def render_timetable(modules: List) -> None:
                 if day_blocked:
                     st.error(t("timetable.blocked_day_warning", halfday=settings.get("blocked_halfday", t("guided.full_day"))))
 
-                for mod in daily_mods:
-                    exam_tag = f" | {t('timetable.exam_tag')}" if getattr(mod, "ist_pruefung", False) else ""
-                    reasons = _absence_reasons_for_module(mod, settings)
-                    prefix = "🔴 " if reasons else ""
-                    st.markdown(
-                        f"{prefix}**{mod.startzeit.strftime('%H:%M')} - {mod.endzeit.strftime('%H:%M')}**"
-                        f" | {mod.modulname}{exam_tag}"
+                if daily_mods:
+                    # A real table instead of stacked markdown/caption lines
+                    # per entry: same information, but scannable as a grid
+                    # (per this app's table-design principles - see
+                    # docs/TESTING-README.md and the "column_config"
+                    # conventions used throughout this file) rather than
+                    # read top-to-bottom one field at a time. Absence
+                    # conflicts get the same red row-tint used everywhere
+                    # else in the app (_style_absence_rows), replacing the
+                    # old one-off "🔴 " text prefix - one consistent visual
+                    # language for "this row has an absence conflict"
+                    # instead of a different convention per tab. The reason
+                    # itself stays in its own column (not just the tint),
+                    # so the signal is never color-alone.
+                    day_rows = [
+                        {
+                            c("start"): mod.startzeit.strftime("%H:%M"),
+                            c("end"): mod.endzeit.strftime("%H:%M"),
+                            c("module"): mod.modulname,
+                            c("exam"): t("guided.yes") if getattr(mod, "ist_pruefung", False) else t("guided.no"),
+                            c("type"): mod.modultyp,
+                            c("room"): mod.raum,
+                            c("lecturers"): mod.dozierende,
+                            c("reason"): ", ".join(_absence_reasons_for_module(mod, settings)),
+                        }
+                        for mod in daily_mods
+                    ]
+                    st.dataframe(
+                        _style_absence_rows(pd.DataFrame(day_rows), c("reason")),
+                        hide_index=True,
+                        width="stretch",
+                        column_config={
+                            c("start"): st.column_config.TimeColumn(c("start"), format="HH:mm", width="small"),
+                            c("end"): st.column_config.TimeColumn(c("end"), format="HH:mm", width="small"),
+                        },
                     )
-                    st.caption(
-                        t(
-                            "timetable.entry_caption",
-                            module_no=getattr(mod, "modul_nr", None) or t("common.na"),
-                            course_no=getattr(mod, "kurs_nr", None) or t("common.na"),
-                            mod_type=mod.modultyp,
-                            room=mod.raum,
-                        )
-                    )
-                    if reasons:
-                        st.caption(t("timetable.absence_reason", reason=", ".join(reasons)))
 
 def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any], all_modules: List[Any]) -> None:
     """
@@ -3063,10 +3229,17 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
 
         conflict_df = pd.DataFrame(conflict_rows).sort_values([c("date"), c("overlap_min"), c("weekday")], ascending=[True, False, True])
 
-        with st.container(border=True):
+        with card("conflicts-summary", "📊", t("conflicts.summary_title").strip("*")):
             if not conflict_summary_df.empty:
-                st.markdown(t("conflicts.summary_title"))
-                st.dataframe(conflict_summary_df, hide_index=True, width="stretch")
+                st.dataframe(
+                    conflict_summary_df,
+                    hide_index=True,
+                    width="stretch",
+                    column_config={
+                        c("overlap_total_min"): st.column_config.NumberColumn(c("overlap_total_min"), format="%d min"),
+                        c("conflict_days_count"): st.column_config.NumberColumn(c("conflict_days_count"), width="small"),
+                    },
+                )
 
             if not conflict_df.empty:
                 top_conflicts = conflict_df.head(8).copy()
@@ -3091,14 +3264,21 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
                 fig_date.update_layout(height=340, margin=dict(l=10, r=10, t=40, b=10))
                 st.plotly_chart(_apply_chart_theme(fig_date), use_container_width=True)
 
-        with st.container(border=True):
-            st.markdown(t("conflicts.details_title"))
-            st.dataframe(conflict_df.style.background_gradient(subset=[c("overlap_min")], cmap="Reds"), hide_index=True, width="stretch")
+        with card("conflicts-details", "🔬", t("conflicts.details_title").strip("*")):
+            st.dataframe(
+                _style_sequential_red(conflict_df, c("overlap_min")),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    c("overlap_min"): st.column_config.NumberColumn(c("overlap_min"), format="%d min"),
+                    c("overlap_pct_module_1"): st.column_config.NumberColumn(c("overlap_pct_module_1"), format="%.1f %%"),
+                    c("overlap_pct_module_2"): st.column_config.NumberColumn(c("overlap_pct_module_2"), format="%.1f %%"),
+                },
+            )
             st.markdown(t("conflicts.interpretation_title"))
             st.caption(t("conflicts.interpretation_text"))
 
-    with st.container(border=True):
-        st.markdown(t("conflicts.absence_title"))
+    with card("conflicts-absence", "🧭", t("conflicts.absence_title").strip("*")):
         if absence_all_df.empty:
             st.info(t("conflicts.absence_none"))
         else:
@@ -3145,18 +3325,15 @@ def render_raw_data() -> None:
 
     col1, col2 = st.columns([1.1, 0.9])
     with col1:
-        with st.container(border=True):
-            st.markdown(t("raw.original"))
+        with card("raw-original", "🗄️", t("raw.original").strip("*")):
             st.dataframe(raw_df, width="stretch", hide_index=True)
 
     with col2:
-        with st.container(border=True):
-            st.markdown(t("raw.help_title"))
+        with card("raw-help", "💡", t("raw.help_title").strip("*")):
             st.write(t("raw.help_text"))
 
         if st.session_state.get("selected_modules"):
-            with st.container(border=True):
-                st.markdown(t("raw.selected"))
+            with card("raw-selected", "✅", t("raw.selected").strip("*")):
                 sel_df = pd.DataFrame([_module_to_ui_row(m) for m in st.session_state.selected_modules])
                 st.dataframe(sel_df, width="stretch", hide_index=True)
 
@@ -3192,8 +3369,7 @@ def main() -> None:
     st.title(t("app.title"))
     st.markdown(t("app.subtitle"))
 
-    with st.container(border=True):
-        st.markdown(f"**{t('app.quickstart_title')}**")
+    with card("app-quickstart", "🚀", t("app.quickstart_title")):
         st.caption(t("app.quickstart_text"))
 
     selected_modules = st.session_state.processed_modules

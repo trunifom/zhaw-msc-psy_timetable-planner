@@ -29,16 +29,19 @@ Besonders unterstützt werden:
 	- Paar-Zusammenfassung
 	- Detailansicht nach Datum und Uhrzeit
 	- Überlappungsminuten und Prozentwerten
-- Design-System (durchgängig, Light/Dark umschaltbar über die Sidebar):
+- Design-System (durchgängig auf allen 5 Tabs plus Sidebar, Light/Dark umschaltbar über die Sidebar):
 	- einheitliche Karten-Sektionen (Icon + Titel + Trennlinie) statt reiner Whitespace-Trennung
-	- konsistente Semantikfarben (Erfolg/Warnung/Kritisch/Info) über die ganze App
-	- aktuell als Pilot im Dashboard-Tab umgesetzt, Rollout auf die restlichen Tabs folgt
+	- konsistente Semantikfarben (Erfolg/Warnung/Kritisch/Info) über die ganze App, sowohl als Badges/Zeilenfärbung in Tabellen als auch in Charts
+	- Tabellen mit typisierten Spalten (`st.column_config`): formatierte Datum-/Zeit-/Zahlenspalten statt Rohstrings, Status-Spalten farbcodiert, Überlappungs-/Risikowerte als sequenzieller Rot-Verlauf (abhängigkeitsfrei implementiert, siehe Troubleshooting)
+	- ECTS-Fortschrittsbalken im Dashboard (Ziel-ECTS vs. aktuelle Auswahl)
+	- Wochenplan-Tab als Tabelle statt Fliesstext (Zeit/Modul/Typ/Raum/Dozierende/Grund je Wochentag)
 - Visualisierung (Dashboard-Charts sind interaktiv anpassbar über ein "🎨 Diagramm-Einstellungen"-Panel):
 	- Wochen-Timeline
 	- Semester-Timeline (Farbe wählbar nach Modul oder Modulart)
 	- Tageslast über den gesamten Zeitraum (Gesamt- oder nach Modul aufgeschlüsselte Ansicht)
 	- Wochentagsverteilung
 	- pro Chart: Farbpalette (inkl. farbenblind-sicher) bzw. Farbskala wählbar, Wochentage ein-/ausblendbar, native Plotly-Werkzeugleiste (Zoom, Pan, PNG-Export)
+	- einheitlicher, theme-abhängiger Chart-Hintergrund (transparent, folgt Light/Dark) über alle Tabs hinweg
 - Export:
 	- XLSX
 	- ICS (alle aktuell ausgewählten Termine, chronologisch sortiert):
@@ -217,6 +220,7 @@ zhaw-msc-psy_timetable-planner/
 	- Zeiten wirken falsch: ICS-Zeiten werden als UTC exportiert (Europe/Zurich-Umrechnung inkl. Sommer-/Winterzeit); der Kalenderclient sollte sie automatisch in die lokale Zeitzone umrechnen
 - Eine Fehlermeldung in der App ist zu knapp, um das Problem zu verstehen:
 	- im Terminal-Log nachsehen (siehe "Fehlerbehandlung und Logging") – dort steht bei unerwarteten Fehlern der vollständige Python-Traceback, bei erwarteten Datenproblemen (z. B. eine fehlgeschlagene Zeilenvalidierung) eine genauere Meldung inkl. Zeilennummer
+- Warum kein `matplotlib` als Abhängigkeit: die farbig hinterlegten Überlappungs-/Risikowerte in den Tabellen sehen aus wie pandas' `Styler.background_gradient()`, sind aber bewusst selbst gebaut (`_style_sequential_red` in `src/app.py`) – `background_gradient()` bricht sonst beim ersten Zugriff mit `ImportError: background_gradient requires matplotlib.` ab, da `matplotlib` nirgends in `requirements.txt`/`environment.yaml` steht. Beim Ergänzen neuer farbcodierter Tabellen bitte diese Funktion wiederverwenden statt `background_gradient()` neu einzuführen
 
 ## Datenschutz
 

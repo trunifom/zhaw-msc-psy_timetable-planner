@@ -117,6 +117,34 @@ Manually exercising the running app (`streamlit run src/app.py`) against
 the fixture file - or your own file in `data/real/` - remains the way to
 check the UI itself.
 
+This gap is real, not theoretical: a design-system pass on `src/app.py`
+(card-based layout, `st.column_config` table formatting, status-color
+Stylers) shipped three bugs that `pytest -q` was structurally unable to
+catch, all only found by actually loading the fixture file in a browser:
+
+- **`ImportError: background_gradient requires matplotlib.`** - pandas'
+  `Styler.background_gradient(cmap=...)` silently requires matplotlib,
+  which is not a dependency of this project, and only raises the first
+  time a table using it actually renders with data (not at import time or
+  in any syntax/compile check). Fixed by `_style_sequential_red()` in
+  `src/app.py`, a small dependency-free replacement - reuse that function
+  for any future "color a numeric column by severity" table instead of
+  reaching for `background_gradient()` again.
+- A card title rendered literal `**asterisks**` on screen - some i18n
+  strings still carry markdown bold markers left over from an older
+  `st.markdown()`-based section header, and the `card()` helper inserts
+  its `title` argument as plain text (not markdown-parsed). See `card()`'s
+  own docstring for the `.strip("*")` convention this requires.
+- Low text contrast at the high-severity end of a red heatmap-style column
+  (dark text on near-black-red). Fixed by flipping to white text past the
+  ratio midpoint in `_style_sequential_red()`.
+
+None of these can get an automated regression test under the current
+"app.py is UI-only, untested" policy - they're recorded here instead so
+the same mistakes aren't repeated. If `src/app.py` ever grows a browser-
+based test harness (e.g. Streamlit's `AppTest`), these three are the first
+candidates to convert into real regression tests.
+
 ## Adding new tests
 
 - Match the file that already covers the module you're changing (see the
