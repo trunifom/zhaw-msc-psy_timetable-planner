@@ -53,8 +53,19 @@ if not logger.handlers:
 # 2. CUSTOM EXCEPTIONS
 # ==========================================
 class DataLoaderError(Exception):
-    """Base exception for data loading issues. Designed to be caught by the GUI."""
-    pass
+    """
+    Base exception for data loading issues. Designed to be caught by the GUI.
+
+    `i18n_key`/`i18n_kwargs` let app.py show this message translated via
+    t(i18n_key, **i18n_kwargs) instead of the English `message` passed here
+    - without them, a German/French user would see this raw English text
+    wrapped inside an otherwise-translated sentence. `message` is still
+    always set (used for server-side logging and as the str(exc) fallback).
+    """
+    def __init__(self, message: str, i18n_key: str | None = None, **i18n_kwargs):
+        super().__init__(message)
+        self.i18n_key = i18n_key
+        self.i18n_kwargs = i18n_kwargs
 
 class MissingColumnError(DataLoaderError):
     """Raised when critical columns are missing from the uploaded dataset."""
@@ -456,7 +467,11 @@ def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     except Exception as e:
         logger.error(f"Sanitization failed: {str(e)}")
-        raise DataSanitizationError(f"Failed to clean dataset: {str(e)}")
+        raise DataSanitizationError(
+            f"Failed to clean dataset: {str(e)}",
+            i18n_key="upload.error_sanitization",
+            error=str(e),
+        )
 
 # ==========================================
 # 5. MAIN DATA LOADER LOGIC
@@ -515,7 +530,12 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame) -> List[ZHAWModule]:
         )
         logger.error(error_msg)
         # Raising a custom error allows the GUI to catch it and display a friendly st.error()
-        raise MissingColumnError(error_msg)
+        raise MissingColumnError(
+            error_msg,
+            i18n_key="upload.error_missing_columns",
+            missing=", ".join(sorted(missing_cols)),
+            detected=detected_cols,
+        )
 
     # 5. Data Sanitization (Handle NaNs, cast types securely)
     df = _sanitize_dataframe(df)
@@ -588,6 +608,9 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame) -> List[ZHAWModule]:
     
     if len(processed_modules) == 0 and len(df) > 0:
         # If all rows failed validation, throw an error to the UI
-        raise DataLoaderError("All rows failed data validation. Please check your time formats (HH:MM) and data types.")
+        raise DataLoaderError(
+            "All rows failed data validation. Please check your time formats (HH:MM) and data types.",
+            i18n_key="upload.error_all_rows_failed",
+        )
 
     return processed_modules

@@ -88,7 +88,7 @@ except ImportError as e:
 # 1. PAGE CONFIGURATION & DESIGN SYSTEM
 # ==========================================
 st.set_page_config(
-    page_title=get_text("de", "app.page_title"),
+    page_title=get_text(st.session_state.get("ui_language", "de"), "app.page_title"),
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -250,8 +250,50 @@ def _inject_design_system_css() -> None:
         .stApp h1 {{ color: var(--zp-text); font-weight: 800; letter-spacing: -0.01em; }}
         .stApp h2 {{ color: var(--zp-text); font-weight: 700; }}
         .stApp h3 {{ color: var(--zp-text); font-weight: 600; }}
-        .stApp p, .stApp label {{ color: var(--zp-text); }}
-        .stCaption, [data-testid="stCaptionContainer"] {{ color: var(--zp-text-muted) !important; }}
+        .stApp p, .stApp label {{ color: var(--zp-text); font-size: 0.95rem; }}
+        .stCaption, [data-testid="stCaptionContainer"] {{ color: var(--zp-text-muted) !important; font-size: 0.85rem; }}
+        [data-testid="stWidgetLabel"] p {{ font-size: 0.9rem; }}
+
+        /* --- Form / input widgets -------------------------------------
+           Streamlit's own light/dark theme detection runs independently
+           of this app's ui_theme toggle (no .streamlit/config.toml pins
+           one), so without this, every actual input control (text/number/
+           date inputs, select/multiselect dropdowns, text areas, the file
+           uploader) keeps following Streamlit's own built-in theme instead
+           of --zp-*. That's what caused inputs to stay a harsh near-black
+           on a white background in light mode, and made input text go
+           near-invisible in dark mode - restyling them here with the same
+           tokens as everything else keeps them softer and theme-consistent. */
+        input, textarea, select,
+        [data-baseweb="input"] input,
+        [data-baseweb="textarea"] textarea,
+        [data-baseweb="select"] > div,
+        .stTextInput input,
+        .stNumberInput input,
+        .stDateInput input,
+        .stTextArea textarea,
+        .stMultiSelect [data-baseweb="select"] > div,
+        .stFileUploader section {{
+            background: var(--zp-surface) !important;
+            color: var(--zp-text) !important;
+            border-color: var(--zp-border) !important;
+            font-size: 0.9rem !important;
+        }}
+        input::placeholder, textarea::placeholder {{
+            color: var(--zp-text-muted) !important;
+        }}
+        [data-baseweb="popover"], [data-baseweb="menu"] {{
+            background: var(--zp-surface) !important;
+        }}
+        [data-baseweb="menu"] li {{
+            color: var(--zp-text) !important;
+        }}
+        .stCheckbox p, .stRadio p, .stToggle p {{
+            color: var(--zp-text) !important;
+        }}
+        .stButton button, .stDownloadButton button {{
+            font-size: 0.9rem;
+        }}
 
         /* --- Metrics --------------------------------------------------- */
         .stMetric {{
@@ -542,7 +584,19 @@ def _format_user_facing_error(exc: Exception) -> str:
     parsers can also raise ValueError subclasses that land in the same
     `except ValueError` branch as a real ValidationError would), this
     condenses it to one "field: message" line per problem instead.
+
+    DataLoaderError and its subclasses (MissingColumnError,
+    DataSanitizationError) instead carry an `i18n_key`/`i18n_kwargs` pair
+    (see data_loader.py) so their message can be shown in the current UI
+    language rather than data_loader.py's hardcoded English wording - that
+    mismatch (an otherwise-translated sentence wrapping a raw English
+    fragment) was a reported bug, so this is checked before falling back to
+    plain str(exc).
     """
+    i18n_key = getattr(exc, "i18n_key", None)
+    if i18n_key:
+        return t(i18n_key, **getattr(exc, "i18n_kwargs", {}))
+
     errors_method = getattr(exc, "errors", None)
     if callable(errors_method):
         try:
@@ -2785,19 +2839,32 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 
 def render_sidebar() -> None:
     """
-    Renders the sidebar: UI language switch, file upload, target-ECTS
-    setting, and (once data exists) the export section.
+    Renders the sidebar: appearance controls, UI language switch, file
+    upload, and (once data exists) the export section.
 
-    Side effects on st.session_state: ui_language (from the language
-    selectbox), target_ects (from the number input, read by render_dashboard
-    to show progress against a goal), and - indirectly, via
-    handle_file_upload()/the "file removed" branch below - raw_data,
+    Side effects on st.session_state: ui_theme (from the appearance
+    toggle), ui_language (from the language selectbox), and - indirectly,
+    via handle_file_upload()/the "file removed" branch below - raw_data,
     processed_modules, conflicts, selected_modules and
     selected_course_bases.
     """
     with st.sidebar:
         st.header(t("sidebar.header"))
         st.markdown(t("sidebar.description"))
+
+        with card("sidebar-appearance", "🎨", t("sidebar.section.appearance")):
+            # Light/Dark toggle: only writes st.session_state.ui_theme here;
+            # _inject_design_system_css() (called unconditionally at the top
+            # of every script run, before this function even executes) is
+            # what actually re-renders the CSS on the *next* rerun that this
+            # toggle triggers - there's nothing else to "apply" here.
+            dark_mode = st.toggle(
+                t("sidebar.theme_dark_toggle"),
+                value=st.session_state.get("ui_theme", "dark") == "dark",
+                key="sidebar_theme_toggle",
+                help=t("sidebar.theme_help"),
+            )
+            st.session_state.ui_theme = "dark" if dark_mode else "light"
 
         with card("sidebar-data", "📁", t("sidebar.section.data")):
             language_options = {
@@ -2812,19 +2879,6 @@ def render_sidebar() -> None:
                 key="sidebar_language_selector",
             )
             st.session_state.ui_language = language_options[selected_language]
-
-            # Light/Dark toggle: only writes st.session_state.ui_theme here;
-            # _inject_design_system_css() (called unconditionally at the top
-            # of every script run, before this function even executes) is
-            # what actually re-renders the CSS on the *next* rerun that this
-            # toggle triggers - there's nothing else to "apply" here.
-            dark_mode = st.toggle(
-                t("sidebar.theme_dark_toggle"),
-                value=st.session_state.get("ui_theme", "dark") == "dark",
-                key="sidebar_theme_toggle",
-                help=t("sidebar.theme_help"),
-            )
-            st.session_state.ui_theme = "dark" if dark_mode else "light"
 
             uploaded_file = st.file_uploader(
                 t("sidebar.upload_label"),
@@ -2856,17 +2910,13 @@ def render_sidebar() -> None:
                 st.session_state.selected_modules = []
                 st.session_state.selected_course_bases = []
 
-        with card("sidebar-settings", "🎯", t("sidebar.section.settings")):
-            target_ects = st.number_input(t("sidebar.target_ects"), min_value=0, max_value=60, value=30, step=1)
-            st.session_state.target_ects = target_ects
-
         if st.session_state.processed_modules:
             st.divider()
             modules_for_export = st.session_state.get("selected_modules") or st.session_state.processed_modules
             render_export_section(modules_for_export)
 
 
-def render_dashboard(modules: List, target_ects: int, all_modules: List[Any]) -> None:
+def render_dashboard(modules: List, all_modules: List[Any]) -> None:
     """
     Render the Dashboard tab: headline metrics, absence-rule impact, and
     analysis charts/tables for the student's current selection.
@@ -2874,8 +2924,6 @@ def render_dashboard(modules: List, target_ects: int, all_modules: List[Any]) ->
     Args:
         modules: the student's currently selected modules (drives most
             metrics/charts - this is "their" data).
-        target_ects: the ECTS goal from the sidebar's number_input, used
-            only to compute the ECTS metric's delta (over/under target).
         all_modules: the full uploaded dataset (unfiltered/unselected),
             used only for the "all data" absence-impact table so the
             student can see absence conflicts across everything on offer,
@@ -2910,17 +2958,7 @@ def render_dashboard(modules: List, target_ects: int, all_modules: List[Any]) ->
     with card("dash-metrics", "📊", t("dashboard.section.metrics")):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric(t("dashboard.metric.ects"), total_ects, delta=total_ects - target_ects)
-            # A single-glance "how full is the semester" bar alongside the
-            # raw number/delta - the classic "workload balance" visual from
-            # student-planner apps (progress toward a goal is one of the
-            # few metrics here that's a pure 0..100% magnitude with one
-            # good direction, exactly what st.progress()/a ProgressColumn
-            # is for - unlike overlap%/absence% below, which are severity
-            # metrics and stay on the red-toned Styler treatment instead).
-            if target_ects > 0:
-                progress_ratio = min(total_ects / target_ects, 1.0)
-                st.progress(progress_ratio, text=t("dashboard.metric.ects_progress", pct=round(progress_ratio * 100)))
+            st.metric(t("dashboard.metric.ects"), total_ects)
         with col2:
             st.metric(t("dashboard.metric.rows"), total_modules)
         with col3:
@@ -3144,6 +3182,7 @@ def render_timetable(modules: List) -> None:
                     # so the signal is never color-alone.
                     day_rows = [
                         {
+                            c("date"): mod.datum,
                             c("start"): mod.startzeit.strftime("%H:%M"),
                             c("end"): mod.endzeit.strftime("%H:%M"),
                             c("module"): mod.modulname,
@@ -3160,6 +3199,7 @@ def render_timetable(modules: List) -> None:
                         hide_index=True,
                         width="stretch",
                         column_config={
+                            c("date"): st.column_config.DateColumn(c("date"), format="DD.MM.YYYY", width="small"),
                             c("start"): st.column_config.TimeColumn(c("start"), format="HH:mm", width="small"),
                             c("end"): st.column_config.TimeColumn(c("end"), format="HH:mm", width="small"),
                         },
@@ -3391,7 +3431,7 @@ def main() -> None:
 
     # Render Content in Tabs
     with tab_dashboard:
-        render_dashboard(selected_modules, st.session_state.get('target_ects', 30), st.session_state.processed_modules)
+        render_dashboard(selected_modules, st.session_state.processed_modules)
 
     with tab_timetable:
         if selected_modules:
