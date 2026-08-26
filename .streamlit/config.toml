@@ -1,0 +1,10 @@
+# Only primaryColor is set here (not the full [theme] block) - the app's
+# own light/dark toggle and CSS injection (see _inject_design_system_css()
+# in src/app.py) already fully control every other themeable surface.
+# primaryColor is the one thing that CSS can't reliably reach: it drives
+# Streamlit's own native widget accent (radio button dots, checkbox checks,
+# toggle switches, sliders, primary-styled buttons, links), which otherwise
+# defaults to Streamlit's own red/pink rather than this app's ZHAW-branded
+# accent color. Set to ZHAW Blau, the university's prescribed accent color.
+[theme]
+primaryColor = "#0064A6"

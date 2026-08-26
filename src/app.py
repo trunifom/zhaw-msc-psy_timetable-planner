@@ -127,6 +127,18 @@ if "sidebar_theme_toggle" in st.session_state:
 # `var(--zp-*)` stay identical. "zp" = ZHAW Planner, used as a namespace
 # prefix so these custom properties/classes never collide with Streamlit's
 # own CSS variables or a future third-party component's.
+#
+# `accent` and (light-mode) `text` follow the ZHAW corporate design: ZHAW
+# Blau (#0064A6) is the university's prescribed title/accent color on a
+# light background, used here for `accent` and therefore for headings (see
+# `.stApp h1/h2/h3` below, which read `var(--zp-accent)`) and the active-tab
+# underline; light-mode body text uses Nacht Dunkelblau (#05366C), the
+# CI's dark-navy body-text color. Neither is CI-defined for a *dark*
+# background (the ZHAW brand guide is written for print/light contexts), so
+# dark mode substitutes Himmel Blau (#9ADCF6) - the CI's own light-blue
+# tint, already close to this app's previous dark-mode accent - for
+# `accent`, and keeps the pre-existing off-white for dark-mode `text`
+# rather than force-fitting an unspecified color.
 THEME_TOKENS: dict[str, dict[str, str]] = {
     "dark": {
         "bg": "#0b0d12",
@@ -136,7 +148,7 @@ THEME_TOKENS: dict[str, dict[str, str]] = {
         "border-strong": "rgba(255,255,255,0.24)",
         "text": "#eaeef7",
         "text-muted": "#9aa3b8",
-        "accent": "#4f8cff",
+        "accent": "#9ADCF6",
         "accent-text": "#ffffff",
         "success": "#22c55e",
         "success-bg": "rgba(34,197,94,0.14)",
@@ -154,9 +166,9 @@ THEME_TOKENS: dict[str, dict[str, str]] = {
         "surface-hover": "#eef0f6",
         "border": "rgba(15,17,23,0.12)",
         "border-strong": "rgba(15,17,23,0.22)",
-        "text": "#1b1f2a",
+        "text": "#05366C",
         "text-muted": "#5b6472",
-        "accent": "#2f6fed",
+        "accent": "#0064A6",
         "accent-text": "#ffffff",
         "success": "#15803d",
         "success-bg": "rgba(21,128,61,0.10)",
@@ -170,24 +182,51 @@ THEME_TOKENS: dict[str, dict[str, str]] = {
     },
 }
 
-# Curated Plotly Express qualitative color sequences offered to the user in
-# each chart's "Diagramm-Einstellungen" panel (see render_dashboard). Kept
-# as a name -> sequence mapping (rather than exposing raw hex lists in the
-# UI) so the selectbox can show a short, translatable label while the
-# actual colors stay Plotly's own well-tested, perceptually-distinct sets.
-# "colorblind_safe" specifically maps to Plotly's "Safe" set, designed to
-# stay distinguishable under the most common forms of color vision
-# deficiency - offered explicitly rather than only as an implicit default,
-# per this app's accessibility-in-color-coding principle (see also
+# Curated qualitative color sequences offered to the user in each chart's
+# "Diagramm-Einstellungen" panel (see render_dashboard). Kept as a name ->
+# sequence mapping (rather than exposing raw hex lists in the UI) so the
+# selectbox can show a short, translatable label. "colorblind_safe"
+# specifically maps to Plotly's "Safe" set, designed to stay distinguishable
+# under the most common forms of color vision deficiency - offered
+# explicitly rather than only as an implicit default, per this app's
+# accessibility-in-color-coding principle (see also
 # _style_absence_rows/_style_risk_rows, which pair color with text/labels
 # rather than relying on color alone for the same reason).
-CHART_PALETTES: dict[str, list[str]] = {
-    "default": px.colors.qualitative.Plotly,
+#
+# "default" ("Standard" in the UI, and the selectbox's first/pre-selected
+# option) uses the ZHAW corporate-design colors rather than Plotly's own
+# palette, since the university prescribes a fixed color set for charts -
+# this is the closest thing this app has to a "house style" for plots. Only
+# 5 of the 12 official CI colors are used here (ZHAW Blau, Koralle,
+# Ozean, Pflaume, Eukalyptus, in this exact order): the other 7 (Nacht
+# Dunkelblau, Himmel Blau, Fuchsia, Sakura Rosa, Gras, Honig, Yuzu Gelb) are
+# either too light/desaturated to read as a distinct categorical fill on a
+# plain background, or too close to a neighboring CI color for people with
+# color vision deficiency to tell apart - each candidate combination was
+# checked against a standard six-point categorical-palette validator
+# (lightness band, chroma floor, adjacent-pair CVD separation, a
+# normal-vision floor, and contrast vs. the chart surface) before being
+# included. The dark-theme variant below isn't the same hex values - two of
+# the five (ZHAW Blau, Pflaume) are too dark to read against this app's near-
+# black chart surface, so they're lightened for dark mode specifically
+# (re-validated against that surface) rather than reused as-is; Koralle,
+# Ozean and Eukalyptus already passed unchanged.
+CHART_PALETTES_LIGHT: dict[str, list[str]] = {
+    "default": ["#0064A6", "#E62154", "#00919B", "#8A249E", "#00795D"],
     "pastel": px.colors.qualitative.Pastel,
     "vivid": px.colors.qualitative.Vivid,
     "colorblind_safe": px.colors.qualitative.Safe,
     "dark24": px.colors.qualitative.Dark24,
 }
+CHART_PALETTES_DARK: dict[str, list[str]] = {
+    **CHART_PALETTES_LIGHT,
+    "default": ["#3383b8", "#E62154", "#00919B", "#9c45ad", "#00795D"],
+}
+
+
+def _chart_palettes() -> dict[str, list[str]]:
+    """The theme-appropriate CHART_PALETTES variant for the current ui_theme."""
+    return CHART_PALETTES_DARK if st.session_state.get("ui_theme", "dark") == "dark" else CHART_PALETTES_LIGHT
 
 # Continuous scales offered for charts that color by a numeric value
 # (currently only the overlap-severity bar chart) rather than by category.
@@ -229,6 +268,14 @@ def _inject_design_system_css() -> None:
         .stApp {{
             background: var(--zp-bg);
             color: var(--zp-text);
+            /* ZHAW's CI type family (Helvetica Neue LT Pro / Helvetica
+               Rounded LT Pro) is a licensed commercial font this app can't
+               ship or link, so this approximates it with the closest
+               available system fonts instead - "Helvetica Neue" on macOS/
+               iOS (where it's actually installed), falling back to Arial
+               (metric-compatible with Helvetica on Windows) and finally the
+               platform's own default sans-serif. */
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
         }}
         /* Streamlit's own top toolbar (Deploy/menu/"Stop" while running)
            lives in a separate fixed header above .stApp's own background,
@@ -246,11 +293,14 @@ def _inject_design_system_css() -> None:
            Streamlit's own h1-h3 (from st.title/st.header/st.subheader)
            get a consistent weight/size/color scale here so visual weight
            always matches semantic importance (pre-attentive hierarchy),
-           instead of every heading defaulting to the same look. */
-        .stApp h1 {{ color: var(--zp-text); font-weight: 800; letter-spacing: -0.01em; }}
-        .stApp h2 {{ color: var(--zp-text); font-weight: 700; }}
-        .stApp h3 {{ color: var(--zp-text); font-weight: 600; }}
-        .stApp p, .stApp label {{ color: var(--zp-text); font-size: 0.95rem; }}
+           instead of every heading defaulting to the same look. Headings
+           use --zp-accent (ZHAW Blau in light mode) rather than --zp-text,
+           matching the CI guide's "title color" rule; line-heights follow
+           the same guide's "Titel: 109%" / "Lauftext: 130%" leading spec. */
+        .stApp h1 {{ color: var(--zp-accent); font-weight: 800; letter-spacing: -0.01em; line-height: 1.09; }}
+        .stApp h2 {{ color: var(--zp-accent); font-weight: 700; line-height: 1.09; }}
+        .stApp h3 {{ color: var(--zp-accent); font-weight: 600; line-height: 1.09; }}
+        .stApp p, .stApp label {{ color: var(--zp-text); font-size: 0.95rem; line-height: 1.3; }}
         .stCaption, [data-testid="stCaptionContainer"] {{ color: var(--zp-text-muted) !important; font-size: 0.85rem; }}
         [data-testid="stWidgetLabel"] p {{ font-size: 0.9rem; }}
 
@@ -2120,11 +2170,11 @@ def _render_chart_toolbar(
             else:
                 palette_name = st.selectbox(
                     t("chart.settings_palette"),
-                    options=list(CHART_PALETTES.keys()),
+                    options=list(_chart_palettes().keys()),
                     format_func=lambda k: t(f"chart.palette.{k}"),
                     key=f"{settings_key}_palette",
                 )
-                palette = CHART_PALETTES[palette_name]
+                palette = _chart_palettes()[palette_name]
 
         filtered = list(modules)
         if show_weekday_filter and modules:
@@ -2444,10 +2494,21 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     else:
         filtered.sort(key=lambda m: str(m.modulname).lower())
 
-    st.markdown(t("guided.step3_title", count=len(filtered)))
+    # Manual __enter__()/__exit__() instead of `with card(...):` (unlike
+    # every other card() call in this file): the selection dispatch below is
+    # a large three-way branch (module/course/row mode, ~380 lines) with an
+    # early `return []` a few lines down - wrapping it in a `with` block
+    # would mean reindenting that entire already-risky branching block just
+    # to add a border. card() is @contextmanager-decorated, so it supports
+    # this directly; __exit__() is called explicitly before each of this
+    # function's two `return` statements instead of relying on `with`/
+    # `try/finally` to do it automatically.
+    step3_card = card("guided-step3", "✅", t("guided.step3_title", count=len(filtered)).strip("*"))
+    step3_card.__enter__()
     if not filtered:
         st.warning(t("guided.no_matches"))
         st.session_state.selected_modules = []
+        step3_card.__exit__(None, None, None)
         return []
 
     selection_mode = st.radio(
@@ -2829,6 +2890,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 
     st.info(t("guided.current_selection", selected=len(selected_modules), filtered=len(filtered)))
     st.session_state.selected_modules = selected_modules
+    step3_card.__exit__(None, None, None)
     return selected_modules
 
 
