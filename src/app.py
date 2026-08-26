@@ -1611,7 +1611,7 @@ def _module_to_ui_row(module: Any) -> dict:
         c("course_no"): getattr(module, "kurs_nr", None) or "",
         c("module"): module.modulname,
         c("weekday"): _weekday_label(module),
-        c("date"): datum_value.strftime("%Y-%m-%d") if datum_value else "",
+        c("date"): datum_value,
         c("time"): f"{module.startzeit.strftime('%H:%M')} - {module.endzeit.strftime('%H:%M')}",
         c("duration_min"): module.duration_minutes,
         c("ects"): module.ects,
@@ -2046,30 +2046,95 @@ def _calculate_exam_feasibility(modules: List[Any]) -> pd.DataFrame:
     return pd.DataFrame(exam_rows)
 
 
+def _weekly_timeline_slots(modules: List[Any]) -> list[dict]:
+    """
+    Collapse `modules` into one entry per unique (weekday, start, end,
+    course) slot, counting how many actual calendar occurrences share that
+    slot and tracking their date range - the aggregation step shared by
+    _weekly_timeline_figure() and the "at a glance" weekly summary above it.
+
+    A recurring course (e.g. every Monday 08:00-10:00 for 14 weeks) used to
+    produce 14 fully overlapping bars stacked exactly on top of each other
+    in the Gantt chart - visually indistinguishable from a single bar, but
+    hover would arbitrarily reflect whichever one Plotly drew last. Merging
+    same-slot occurrences into one row fixes that and, as a side effect,
+    is exactly the data a "N Termine diese Woche" summary needs.
+    """
+    slots: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for module in modules:
+        weekday = _weekday_label(module)
+        start_key = module.startzeit.strftime("%H:%M:%S")
+        end_key = module.endzeit.strftime("%H:%M:%S")
+        label = _module_label(module)
+        key = (weekday, start_key, end_key, label)
+        slot = slots.setdefault(
+            key,
+            {
+                "weekday": weekday,
+                "label": label,
+                "short_label": str(getattr(module, "modulname", "") or label).strip(),
+                "start": start_key,
+                "end": end_key,
+                "duration_minutes": max(
+                    0,
+                    (module.endzeit.hour * 60 + module.endzeit.minute)
+                    - (module.startzeit.hour * 60 + module.startzeit.minute),
+                ),
+                "type": module.modultyp,
+                "exam": False,
+                "dates": [],
+            },
+        )
+        slot["exam"] = slot["exam"] or bool(getattr(module, "ist_pruefung", False))
+        datum = getattr(module, "datum", None)
+        if datum is not None:
+            slot["dates"].append(datum)
+    return list(slots.values())
+
+
 def _weekly_timeline_figure(modules: List[Any]):
     """
     Build the "typical week" Gantt-style timeline used in the Timetable tab:
-    one row per weekday, one bar per module colored by module type,
-    overlaid with synthetic bars for any active blocked-weekday absence rule
-    (see _absence_overlay_for_week). Unlike _semester_timeline_figure() this
+    one row per weekday, one bar per unique course slot (see
+    _weekly_timeline_slots) colored by module type, overlaid with synthetic
+    bars for any active blocked-weekday absence rule (see
+    _absence_overlay_for_week). Unlike _semester_timeline_figure() this
     intentionally collapses the whole semester into a single representative
     week - every module (dated or recurring) is plotted purely by its
     time-of-day, ignoring which actual calendar date it falls on, which is
     exactly what the 1970-01-01 dummy-date trick below achieves (see inline
     comment at the `c("start")`/`c("end")` construction).
+
+    Two readability additions beyond the raw bars: the course name is
+    printed directly on each bar (Plotly hides it automatically if the bar
+    is too narrow, so this degrades gracefully rather than overflowing) -
+    "direct labeling beats a legend" for a non-technical audience, since it
+    removes the need to hover or cross-reference a color swatch just to
+    know which course a bar is. Exam slots additionally get a diagonal
+    pattern fill (a second, color-independent encoding) so they stand out
+    even for colorblind users or a black-and-white printout, not just via
+    the "type" color/legend.
     """
     if not modules:
         return None
 
     day_labels = _weekday_labels_in_order()
     day_order = {label: idx for idx, label in enumerate(day_labels)}
+
     rows = []
-    settings = _absence_settings()
-    for module in modules:
+    for slot in _weekly_timeline_slots(modules):
+        dates = sorted(slot["dates"])
+        occurrences = max(len(dates), 1)
+        if len(dates) >= 2:
+            date_range = f"{dates[0].strftime('%d.%m.%Y')} - {dates[-1].strftime('%d.%m.%Y')}"
+        elif len(dates) == 1:
+            date_range = dates[0].strftime("%d.%m.%Y")
+        else:
+            date_range = t("common.unknown_date")
         rows.append(
             {
-                c("weekday"): _weekday_label(module),
-                c("module"): _module_label(module),
+                c("weekday"): slot["weekday"],
+                c("module"): slot["label"],
                 # 1970-01-01 dummy-date trick: px.timeline() (Plotly's Gantt
                 # chart) requires real datetime values for x_start/x_end, but
                 # this chart only wants to compare times-of-day across
@@ -2080,15 +2145,25 @@ def _weekly_timeline_figure(modules: List[Any]):
                 # requirement. Must match the dummy date used in
                 # _absence_overlay_for_week() so overlay bars line up
                 # correctly once concatenated below.
-                c("start"): pd.to_datetime(f"1970-01-01 {module.startzeit.strftime('%H:%M:%S')}"),
-                c("end"): pd.to_datetime(f"1970-01-01 {module.endzeit.strftime('%H:%M:%S')}"),
-                c("type"): module.modultyp,
+                c("start"): pd.to_datetime(f"1970-01-01 {slot['start']}"),
+                c("end"): pd.to_datetime(f"1970-01-01 {slot['end']}"),
+                c("type"): slot["type"],
+                "short_label": slot["short_label"],
+                "exam": slot["exam"],
+                c("occurrences"): occurrences,
+                c("period"): date_range,
             }
         )
 
     df = pd.DataFrame(rows)
+    settings = _absence_settings()
     overlay_df = _absence_overlay_for_week(settings)
     if not overlay_df.empty:
+        overlay_df = overlay_df.copy()
+        overlay_df["short_label"] = overlay_df[c("module")]
+        overlay_df["exam"] = False
+        overlay_df[c("occurrences")] = 1
+        overlay_df[c("period")] = ""
         df = pd.concat([df, overlay_df], ignore_index=True)
     if df.empty:
         return None
@@ -2099,10 +2174,38 @@ def _weekly_timeline_figure(modules: List[Any]):
         x_end=c("end"),
         y=c("weekday"),
         color=c("type"),
+        text="short_label",
+        pattern_shape="exam",
+        pattern_shape_map={True: "/", False: ""},
         hover_name=c("module"),
-        hover_data={c("start"): False, c("end"): False},
+        hover_data={
+            c("start"): False,
+            c("end"): False,
+            "short_label": False,
+            "exam": False,
+            c("occurrences"): True,
+            c("period"): True,
+        },
         category_orders={c("weekday"): list(day_order.keys())},
     )
+    fig.update_traces(textposition="inside", insidetextanchor="start", textfont_size=11)
+
+    # Combining `color` with `pattern_shape` makes Plotly Express create one
+    # trace per (type, exam) pair, auto-named "Wahlpflichtmodul, False" /
+    # "..., True" - the raw boolean leaking into the legend text. The
+    # pattern is meant as an extra visual cue on the bars themselves (see
+    # docstring), not a second legend dimension, so trace names are
+    # trimmed back down to just the type, and any duplicate that creates
+    # (the same type appearing as both exam and non-exam) is hidden from
+    # the legend rather than shown twice for the same color.
+    _seen_legend_names: set[str] = set()
+
+    def _dedupe_legend_name(trace):
+        base_name = trace.name.split(",")[0].strip() if trace.name else trace.name
+        trace.update(name=base_name, showlegend=base_name not in _seen_legend_names)
+        _seen_legend_names.add(base_name)
+
+    fig.for_each_trace(_dedupe_legend_name)
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(
         height=420,
@@ -2139,6 +2242,26 @@ def _weekday_bar_figure(modules: List[Any], color_sequence: list[str] | None = N
     )
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=40, b=10), yaxis_title=t("chart.yaxis_items"), showlegend=False)
     return _apply_chart_theme(fig)
+
+
+def _busiest_weekday(modules: List[Any]) -> tuple[str | None, int]:
+    """
+    The weekday with the most rows in `modules`, and its row count - the
+    one-line "headline" surfaced under the weekday-distribution chart (see
+    render_dashboard) so the chart's main takeaway is stated directly
+    instead of making the student read bar heights themselves. Ties break
+    on weekday order (Monday first), matching the chart's own x-axis order.
+    Returns (None, 0) for an empty list.
+    """
+    if not modules:
+        return None, 0
+    counts: dict[str, int] = {}
+    for module in modules:
+        day = _weekday_label(module)
+        counts[day] = counts.get(day, 0) + 1
+    order = _weekday_labels_in_order()
+    busiest = max(counts, key=lambda day: (counts[day], -order.index(day) if day in order else 0))
+    return busiest, counts[busiest]
 
 
 def _overlap_bar_figure(summary_df: pd.DataFrame, color_scale: str = "Reds"):
@@ -3021,21 +3144,21 @@ def render_sidebar() -> None:
             render_export_section(modules_for_export)
 
 
-def render_dashboard(modules: List, all_modules: List[Any]) -> None:
+def render_dashboard(modules: List) -> None:
     """
     Render the Dashboard tab: headline metrics, absence-rule impact, and
     analysis charts/tables for the student's current selection.
 
     Args:
-        modules: the student's currently selected modules (drives most
-            metrics/charts - this is "their" data).
-        all_modules: the full uploaded dataset (unfiltered/unselected),
-            used only for the "all data" absence-impact table so the
-            student can see absence conflicts across everything on offer,
-            not just what they've already picked.
+        modules: the student's currently selected modules - drives every
+            metric/chart/table on this tab. The full uploaded dataset
+            (all offered courses, not just the selection) is intentionally
+            not passed in here - that full-dataset absence breakdown lives
+            only in the Konfliktanalyse tab now (see the dash-absence card
+            below) to avoid rendering the same deep-dive table in two tabs.
 
-    Renders (in order): a KPI metrics row, an absence-rules summary with
-    per-rule conflict tables, weekday/overlap/semester-timeline/daily-load
+    Renders (in order): a KPI metrics row, a condensed absence-rule status
+    for the current selection, weekday/overlap/semester-timeline/daily-load
     charts, and finally a KPI/exam-status/overlap-rate tables section. Pure
     rendering - does not mutate st.session_state.
     """
@@ -3057,8 +3180,6 @@ def render_dashboard(modules: List, all_modules: List[Any]) -> None:
     absence_settings = _absence_settings()
     absence_rules = _absence_rules_summary(absence_settings)
     absence_selected_df = _absence_conflict_dataframe(modules, absence_settings)
-    absence_all_df = _absence_conflict_dataframe(all_modules, absence_settings)
-    absence_course_df = _absence_course_impact_dataframe(modules, absence_settings)
 
     with card("dash-metrics", "📊", t("dashboard.section.metrics")):
         col1, col2, col3, col4 = st.columns(4)
@@ -3084,6 +3205,15 @@ def render_dashboard(modules: List, all_modules: List[Any]) -> None:
         with col8:
             st.metric(t("dashboard.metric.absence_rows"), len(absence_selected_df))
 
+    # Condensed on purpose: this card used to also reproduce the full
+    # per-course risk table and the "all offered courses" absence-conflict
+    # table (identical in shape/content to render_conflict_analysis's
+    # "conflicts-absence" card, just with a different .head() truncation
+    # cap) - a dashboard should answer "does MY current selection have a
+    # problem" in one glance, not re-render another tab's deep-dive wholesale.
+    # Only the selection-specific status stays here; the full breakdown by
+    # course/risk lives exclusively in the Konfliktanalyse tab now, with a
+    # pointer below instead of a duplicate render.
     with card("dash-absence", "🧭", t("dashboard.section.absence")):
         if not absence_rules:
             st.info(t("dashboard.absence.none"))
@@ -3099,19 +3229,7 @@ def render_dashboard(modules: List, all_modules: List[Any]) -> None:
                 st.warning(t("dashboard.absence.current_selection_conflicts", count=len(absence_selected_df)))
                 st.dataframe(_style_absence_rows(absence_selected_df, c("reason")), hide_index=True, width="stretch")
 
-            st.markdown(t("dashboard.absence.course_impact_title"))
-            if absence_course_df.empty:
-                st.info(t("dashboard.absence.course_impact_none"))
-            else:
-                st.caption(t("dashboard.absence.course_impact_caption"))
-                st.dataframe(_style_risk_rows(absence_course_df), hide_index=True, width="stretch")
-
-            st.markdown(t("dashboard.absence.all_data"))
-            if absence_all_df.empty:
-                st.info(t("dashboard.absence.all_data_none"))
-            else:
-                st.caption(t("dashboard.absence.all_data_caption", count=len(absence_all_df)))
-                st.dataframe(absence_all_df.head(50), hide_index=True, width="stretch")
+            st.caption(t("dashboard.absence.see_conflicts_tab"))
 
     overlap_summary = _calculate_module_overlap_summary(modules)
     exam_df = _calculate_exam_feasibility(modules)
@@ -3133,6 +3251,9 @@ def render_dashboard(modules: List, all_modules: List[Any]) -> None:
             fig = _weekday_bar_figure(weekday_modules, color_sequence=weekday_palette)
             if fig is not None:
                 st.plotly_chart(fig, use_container_width=True)
+                busiest_day, busiest_count = _busiest_weekday(weekday_modules)
+                if busiest_day:
+                    st.caption(t("dashboard.chart.weekday_insight", day=busiest_day, count=busiest_count))
         with chart_col2:
             st.markdown(t("dashboard.chart.overlap_title"))
             st.caption(t("dashboard.chart.overlap_caption"))
@@ -3252,6 +3373,33 @@ def render_timetable(modules: List) -> None:
 
     with card("timetable-chart", "🗓️", t("timetable.section.chart")):
         st.caption(t("timetable.caption"))
+
+        # "At a glance" stat row, computed from the same slot aggregation
+        # the chart itself uses (_weekly_timeline_slots) - answers "how
+        # busy is a typical week" in three numbers before the student has
+        # to read the chart at all, per the "what must they understand in
+        # 5 seconds" dashboard-design principle.
+        slots = _weekly_timeline_slots(modules)
+        if slots:
+            weekday_counts: dict[str, int] = {}
+            total_minutes = 0
+            for slot in slots:
+                weekday_counts[slot["weekday"]] = weekday_counts.get(slot["weekday"], 0) + 1
+                total_minutes += slot["duration_minutes"]
+            busiest_day = max(weekday_counts, key=weekday_counts.get)
+
+            stat_col1, stat_col2, stat_col3 = st.columns(3)
+            with stat_col1:
+                st.metric(t("timetable.summary.slots"), len(slots))
+            with stat_col2:
+                st.metric(t("timetable.summary.hours"), f"{total_minutes / 60:.1f} h")
+            with stat_col3:
+                st.metric(
+                    t("timetable.summary.busiest_day"),
+                    busiest_day,
+                    help=t("timetable.summary.busiest_day_help", count=weekday_counts[busiest_day]),
+                )
+
         fig = _weekly_timeline_figure(modules)
         if fig is not None:
             st.plotly_chart(fig, use_container_width=True)
@@ -3398,6 +3546,8 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
                 )
                 fig.update_layout(height=max(420, 44 * len(top_conflicts) + 120), margin=dict(l=10, r=10, t=40, b=10))
                 st.plotly_chart(_apply_chart_theme(fig), use_container_width=True)
+                if len(conflict_df) > len(top_conflicts):
+                    st.caption(t("chart.conflict_top_truncated", shown=len(top_conflicts), total=len(conflict_df)))
 
                 by_day = conflict_df.groupby(c("weekday"), as_index=False)[c("overlap_min")].sum()
                 fig_day = px.pie(by_day, values=c("overlap_min"), names=c("weekday"), title=t("conflicts.chart.by_weekday"))
@@ -3471,6 +3621,7 @@ def render_raw_data() -> None:
     col1, col2 = st.columns([1.1, 0.9])
     with col1:
         with card("raw-original", "🗄️", t("raw.original").strip("*")):
+            st.caption(t("raw.row_count", count=len(raw_df)))
             st.dataframe(raw_df, width="stretch", hide_index=True)
 
     with col2:
@@ -3480,7 +3631,16 @@ def render_raw_data() -> None:
         if st.session_state.get("selected_modules"):
             with card("raw-selected", "✅", t("raw.selected").strip("*")):
                 sel_df = pd.DataFrame([_module_to_ui_row(m) for m in st.session_state.selected_modules])
-                st.dataframe(sel_df, width="stretch", hide_index=True)
+                st.dataframe(
+                    sel_df,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        c("date"): st.column_config.DateColumn(c("date"), format="DD.MM.YYYY", width="small"),
+                        c("duration_min"): st.column_config.NumberColumn(c("duration_min"), format="%d min"),
+                        c("ects"): st.column_config.NumberColumn(c("ects"), width="small"),
+                    },
+                )
 
 # ==========================================
 # 5. MAIN APPLICATION CONTROLLER
@@ -3536,7 +3696,7 @@ def main() -> None:
 
     # Render Content in Tabs
     with tab_dashboard:
-        render_dashboard(selected_modules, st.session_state.processed_modules)
+        render_dashboard(selected_modules)
 
     with tab_timetable:
         if selected_modules:
