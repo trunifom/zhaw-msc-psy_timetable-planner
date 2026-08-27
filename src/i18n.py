@@ -85,7 +85,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "export.ics_missing_dates": "Achtung: {count} Termine hatten kein Datum in der Excelliste und wurden als ganztägiger Platzhalter-Termin exportiert. Bitte Datum manuell prüfen.",
         "export.error": "Export-Fehler: Datei konnte nicht erzeugt werden. ({error})",
 
-        "guided.subheader": "🧭 Geführte Studienplanung",
+        "guided.subheader": "🧭 Geführte Semesterplanung",
         "guided.no_data": "Bitte zuerst eine Planungsdatei hochladen.",
         "guided.intro": "Beantworte die Schritte nacheinander. Die Auswahl wird laufend angepasst.",
         "guided.step1": "**Schritt 1: Verfügbarkeit im Semester**",
@@ -249,6 +249,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.settings_weekday_filter": "Wochentage anzeigen",
         "chart.settings_color_by": "Farbe nach",
         "chart.settings_view_mode": "Ansicht",
+        "chart.settings_color_mode": "Farbdarstellung",
         "chart.palette.default": "Standard",
         "chart.palette.pastel": "Pastell",
         "chart.palette.vivid": "Kräftig",
@@ -256,6 +257,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.palette.dark24": "Dunkel (24 Farben)",
         "chart.color_by_module": "Modul",
         "chart.color_by_type": "Modulart",
+        "chart.color_mode_multi": "Mehrfarbig (nach Modul)",
+        "chart.color_mode_single": "Einfarbig",
         "chart.view_total": "Gesamt",
         "chart.view_by_module": "Nach Modul aufgeschlüsselt",
 
@@ -398,7 +401,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "export.ics_missing_dates": "Note: {count} items had no date in the Excel file and were exported as an all-day placeholder. Please check the date manually.",
         "export.error": "Export error: Could not generate file. ({error})",
 
-        "guided.subheader": "🧭 Guided Study Planning",
+        "guided.subheader": "🧭 Guided Semester Planning",
         "guided.no_data": "Please upload a planning file first.",
         "guided.intro": "Answer the steps in order. The selection updates continuously.",
         "guided.step1": "**Step 1: Availability during semester**",
@@ -562,6 +565,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.settings_weekday_filter": "Show weekdays",
         "chart.settings_color_by": "Color by",
         "chart.settings_view_mode": "View",
+        "chart.settings_color_mode": "Color style",
         "chart.palette.default": "Default",
         "chart.palette.pastel": "Pastel",
         "chart.palette.vivid": "Vivid",
@@ -569,6 +573,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.palette.dark24": "Dark (24 colors)",
         "chart.color_by_module": "Module",
         "chart.color_by_type": "Module type",
+        "chart.color_mode_multi": "Multicolor (by course)",
+        "chart.color_mode_single": "Single color",
         "chart.view_total": "Total",
         "chart.view_by_module": "Split by module",
 
@@ -711,7 +717,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "export.ics_missing_dates": "Attention : {count} éléments n'avaient pas de date dans le fichier Excel et ont été exportés comme événement de la journée entière. Merci de vérifier la date manuellement.",
         "export.error": "Erreur d'export : impossible de générer le fichier. ({error})",
 
-        "guided.subheader": "🧭 Planification des études guidée",
+        "guided.subheader": "🧭 Planification du semestre guidée",
         "guided.no_data": "Importe d'abord un fichier de planification.",
         "guided.intro": "Réponds aux étapes dans l'ordre. La sélection est mise à jour en continu.",
         "guided.step1": "**Étape 1 : Disponibilité pendant le semestre**",
@@ -875,6 +881,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.settings_weekday_filter": "Jours affichés",
         "chart.settings_color_by": "Couleur par",
         "chart.settings_view_mode": "Vue",
+        "chart.settings_color_mode": "Style de couleur",
         "chart.palette.default": "Standard",
         "chart.palette.pastel": "Pastel",
         "chart.palette.vivid": "Vif",
@@ -882,6 +889,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.palette.dark24": "Sombre (24 couleurs)",
         "chart.color_by_module": "Module",
         "chart.color_by_type": "Type de module",
+        "chart.color_mode_multi": "Multicolore (par cours)",
+        "chart.color_mode_single": "Une seule couleur",
         "chart.view_total": "Total",
         "chart.view_by_module": "Réparti par module",
 

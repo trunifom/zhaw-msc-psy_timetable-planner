@@ -100,9 +100,12 @@ st.set_page_config(
 # This minimal, idempotent bootstrap breaks that chicken-and-egg problem
 # without reordering the whole file; init_session_state() re-applies the
 # same guarded assignment below for documentation completeness (harmless -
-# `if key not in session_state` makes both calls safe together).
+# `if key not in session_state` makes both calls safe together). Default is
+# "light" (product decision - most students' first impression should be the
+# lighter, more familiar-looking theme); dark stays one click away via the
+# sidebar toggle.
 if "ui_theme" not in st.session_state:
-    st.session_state.ui_theme = "dark"
+    st.session_state.ui_theme = "light"
 
 # Keep ui_theme in sync with the sidebar toggle's own widget state BEFORE
 # the CSS is generated below. Without this, toggling the theme would look
@@ -247,7 +250,7 @@ CHART_PALETTES_DARK: dict[str, list[str]] = {
 
 def _chart_palettes() -> dict[str, list[str]]:
     """The theme-appropriate CHART_PALETTES variant for the current ui_theme."""
-    return CHART_PALETTES_DARK if st.session_state.get("ui_theme", "dark") == "dark" else CHART_PALETTES_LIGHT
+    return CHART_PALETTES_DARK if st.session_state.get("ui_theme", "light") == "dark" else CHART_PALETTES_LIGHT
 
 # Continuous scales offered for charts that color by a numeric value
 # (currently only the overlap-severity bar chart) rather than by category.
@@ -275,7 +278,7 @@ def _inject_design_system_css() -> None:
          Streamlit's documented behavior of adding a `st-key-<key>` CSS
          class to a container created with `key=...`.
     """
-    theme = THEME_TOKENS.get(st.session_state.get("ui_theme", "dark"), THEME_TOKENS["dark"])
+    theme = THEME_TOKENS.get(st.session_state.get("ui_theme", "light"), THEME_TOKENS["light"])
     css_vars = "\n".join(f"    --zp-{name}: {value};" for name, value in theme.items())
 
     st.markdown(
@@ -524,7 +527,7 @@ def init_session_state() -> None:
     if 'ui_language' not in st.session_state:
         st.session_state.ui_language = "de"
     if 'ui_theme' not in st.session_state:
-        st.session_state.ui_theme = "dark"
+        st.session_state.ui_theme = "light"
 
 
 def t(key: str, **kwargs: object) -> str:
@@ -638,7 +641,7 @@ def _apply_chart_theme(fig):
     other tabs would undermine the one-consistent-look-across-the-app goal
     even though those tabs' charts aren't otherwise part of this pass.
     """
-    theme = THEME_TOKENS.get(st.session_state.get("ui_theme", "dark"), THEME_TOKENS["dark"])
+    theme = THEME_TOKENS.get(st.session_state.get("ui_theme", "light"), THEME_TOKENS["light"])
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -1767,15 +1770,27 @@ def _calculate_overlap_rows(modules: List[Any]) -> List[dict]:
 
 def _calculate_module_overlap_summary(modules: List[Any]) -> pd.DataFrame:
     """
-    Per-module rollup (one row per module, not per pair) of total overlap
-    minutes with any other module, used to drive the "which modules are most
-    affected by conflicts" bar chart (_overlap_bar_figure). Uses the same
-    pairwise scan, same-occurrence check, and dedup strategy as
-    _calculate_overlap_rows() above, but instead of emitting a row per
-    conflicting pair, it accumulates each pair's overlap onto *both*
-    module's running totals (totals[id(left)] and totals[id(right)] each
-    get += overlap), keyed by Python object identity (id()) since two
-    different rows can otherwise be indistinguishable by value.
+    Per-COURSE rollup (one row per course - see _module_group_title - not
+    per individual session row) of total overlap minutes with any other
+    course, used to drive the "which courses are most affected by
+    conflicts" bar chart (_overlap_bar_figure) and the KPI overlap-rate
+    table. Uses the same pairwise scan, same-occurrence check, and dedup
+    strategy as _calculate_overlap_rows() above to accumulate each pair's
+    overlap onto *both* modules' running totals (totals[id(left)] and
+    totals[id(right)] each get += overlap, keyed by Python object identity
+    since two different rows can otherwise be indistinguishable by value),
+    then rolls every session belonging to the same course into one summary
+    row instead of returning one row per raw session.
+
+    That last step is the important part: an earlier version of this
+    function returned one row per raw module row, so a course meeting
+    weekly for a whole semester produced a dozen near-identical rows (same
+    course name, slightly different per-week overlap numbers) - reported
+    as making both the bar chart and the KPI table's "pro Kurs"/"per
+    course" section (which already promised per-course granularity in its
+    own heading, a promise this function wasn't actually keeping) cluttered
+    and hard to read. Aggregating here fixes it once for every consumer of
+    this dataframe instead of just the chart.
     """
     if not modules:
         return pd.DataFrame()
@@ -1800,24 +1815,39 @@ def _calculate_module_overlap_summary(modules: List[Any]) -> pd.DataFrame:
             totals[id(left)] += overlap
             totals[id(right)] += overlap
 
-    summary_rows = []
+    # One accumulator per course (_module_group_title - the same grouping
+    # key already used for the absence course-impact table, so "a course"
+    # means the same thing across the whole app). `total_duration_min`
+    # (summed across every occurrence) is the denominator for overlap_pct
+    # below - the average overlap across the whole semester's worth of
+    # sessions, not just one arbitrary session's percentage.
+    courses: dict[str, dict[str, Any]] = {}
     for module in modules:
-        overlap_total = totals[id(module)]
-        duration = max(1, module.duration_minutes)
-        summary_rows.append(
-            {
-                c("module"): _module_label(module),
-                c("base_course"): _module_group_title(module),
-                c("weekday"): _weekday_label(module),
-                c("duration_min"): module.duration_minutes,
-                c("overlap_total_min"): overlap_total,
-                c("overlap_pct"): round((overlap_total / duration) * 100, 1),
-            }
+        course_key = _module_group_title(module)
+        course = courses.setdefault(
+            course_key,
+            {"weekdays": set(), "duration_min": module.duration_minutes, "total_duration_min": 0, "overlap_total_min": 0, "occurrences": 0},
         )
+        course["weekdays"].add(_weekday_label(module))
+        course["total_duration_min"] += max(1, module.duration_minutes)
+        course["overlap_total_min"] += totals[id(module)]
+        course["occurrences"] += 1
+
+    summary_rows = [
+        {
+            c("base_course"): course_key,
+            c("weekday"): ", ".join(sorted(data["weekdays"])),
+            c("duration_min"): data["duration_min"],
+            c("occurrences"): data["occurrences"],
+            c("overlap_total_min"): data["overlap_total_min"],
+            c("overlap_pct"): round((data["overlap_total_min"] / data["total_duration_min"]) * 100, 1),
+        }
+        for course_key, data in courses.items()
+    ]
 
     df = pd.DataFrame(summary_rows)
     if not df.empty:
-        df = df.sort_values([c("overlap_total_min"), c("module")], ascending=[False, True])
+        df = df.sort_values([c("overlap_total_min"), c("base_course")], ascending=[False, True])
     return df
 
 
@@ -1885,16 +1915,27 @@ def _summarize_conflicts(conflicts: List[Tuple[Any, Any]]) -> pd.DataFrame:
 
 def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | None = None, color_by: str = "module"):
     """
-    Build a Gantt-style Plotly timeline (px.timeline) spanning the whole
-    semester: one horizontal bar per dated lesson, positioned on its actual
-    calendar date+time, grouped by weekday row and colored by module. Unlike
-    _weekly_timeline_figure() (which shows a single representative week),
-    this chart uses REAL dates on the x-axis (not the 1970-01-01 dummy-date
-    trick), so students can see the actual semester-long cadence of a
-    course (e.g. "every second Monday" becomes visually obvious).
+    Build a Plotly scatter timeline spanning the whole semester: one marker
+    per dated lesson, positioned on its actual calendar date+time, grouped
+    by weekday row and colored by module. Unlike _weekly_timeline_figure()
+    (which shows a single representative week), this chart uses REAL dates
+    on the x-axis, so students can see the actual semester-long cadence of
+    a course (e.g. "every second Monday" becomes visually obvious).
     Undated/recurring rows (no `datum`) are skipped since they have no
-    single calendar position to place on this axis; returns None (nothing to
-    render) if no row has a date at all.
+    single calendar position to place on this axis; returns None (nothing
+    to render) if no row has a date at all.
+
+    Uses px.scatter (fixed-size markers) rather than px.timeline (Gantt
+    bars, an earlier version of this chart) - a single lesson (1-3 hours)
+    is a tiny sliver of a ~4-month semester, so a true-duration Gantt bar
+    drawn at that scale is only a few pixels wide, reported as "barely
+    visible, can't even tell which day". A marker's on-screen size doesn't
+    depend on the session's real duration, so it stays clearly visible and
+    easy to associate with its weekday row no matter how compressed the
+    date axis gets; the exact date and time are still one hover away, and
+    the session's actual duration is what the Wochenplan tab's weekly view
+    and the daily-load chart below already answer, so nothing is lost by
+    not encoding duration as bar width here too.
 
     `color_sequence`: an optional list of hex colors (see CHART_PALETTES)
     overriding Plotly's default qualitative palette - exposed to the user
@@ -1915,9 +1956,9 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
             {
                 c("module"): _module_label(module),
                 c("start_datetime"): pd.to_datetime(f"{datum_value.isoformat()} {module.startzeit.strftime('%H:%M:%S')}"),
-                c("end_datetime"): pd.to_datetime(f"{datum_value.isoformat()} {module.endzeit.strftime('%H:%M:%S')}"),
                 c("weekday"): _weekday_label(module),
                 c("type"): module.modultyp,
+                c("time"): f"{module.startzeit.strftime('%H:%M')} - {module.endzeit.strftime('%H:%M')}",
             }
         )
 
@@ -1925,17 +1966,22 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
         return None
 
     df = pd.DataFrame(rows)
-    fig = px.timeline(
+    fig = px.scatter(
         df,
-        x_start=c("start_datetime"),
-        x_end=c("end_datetime"),
+        x=c("start_datetime"),
         y=c("weekday"),
         color=color_dimension,
         color_discrete_sequence=color_sequence,
         hover_name=c("module"),
-        hover_data={c("type"): True},
+        hover_data={c("type"): True, c("time"): True, c("start_datetime"): "|%d.%m.%Y"},
         category_orders={c("weekday"): _weekday_labels_in_order()},
     )
+    # Bigger, semi-transparent markers: big enough to stay visible when many
+    # sessions land close together on the compressed date axis, and
+    # semi-transparent so an actual cluster of overlapping dates still
+    # reads as "several events here" (darker) rather than one dot silently
+    # hiding the others underneath it.
+    fig.update_traces(marker=dict(size=14, opacity=0.85))
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(
         height=560,
@@ -2092,18 +2138,28 @@ def _weekly_timeline_slots(modules: List[Any]) -> list[dict]:
     return list(slots.values())
 
 
-def _weekly_timeline_figure(modules: List[Any]):
+def _weekly_timeline_figure(modules: List[Any], color_mode: str = "multi", color_sequence: list[str] | None = None):
     """
     Build the "typical week" Gantt-style timeline used in the Timetable tab:
     one row per weekday, one bar per unique course slot (see
-    _weekly_timeline_slots) colored by module type, overlaid with synthetic
-    bars for any active blocked-weekday absence rule (see
-    _absence_overlay_for_week). Unlike _semester_timeline_figure() this
-    intentionally collapses the whole semester into a single representative
-    week - every module (dated or recurring) is plotted purely by its
-    time-of-day, ignoring which actual calendar date it falls on, which is
-    exactly what the 1970-01-01 dummy-date trick below achieves (see inline
-    comment at the `c("start")`/`c("end")` construction).
+    _weekly_timeline_slots), overlaid with synthetic bars for any active
+    blocked-weekday absence rule (see _absence_overlay_for_week). Unlike
+    _semester_timeline_figure() this intentionally collapses the whole
+    semester into a single representative week - every module (dated or
+    recurring) is plotted purely by its time-of-day, ignoring which actual
+    calendar date it falls on, which is exactly what the 1970-01-01
+    dummy-date trick below achieves (see inline comment at the
+    `c("start")`/`c("end")` construction).
+
+    `color_mode`: "multi" (default) colors each bar by its individual
+    course (`c("module")`, via `color_sequence` - see CHART_PALETTES),
+    giving every course its own distinct color; "single" ignores
+    `color_sequence` and paints every bar with the current theme's accent
+    color instead ("alle Module in Blau"), for a calmer look when the
+    student doesn't need per-course color-coding. Both modes are exposed to
+    the user via the chart's "Diagramm-Einstellungen" panel (see
+    render_timetable) - was previously a fixed, non-configurable "color by
+    module type" scheme.
 
     Two readability additions beyond the raw bars: the course name is
     printed directly on each bar (Plotly hides it automatically if the bar
@@ -2113,7 +2169,7 @@ def _weekly_timeline_figure(modules: List[Any]):
     know which course a bar is. Exam slots additionally get a diagonal
     pattern fill (a second, color-independent encoding) so they stand out
     even for colorblind users or a black-and-white printout, not just via
-    the "type" color/legend.
+    color/legend.
     """
     if not modules:
         return None
@@ -2177,12 +2233,30 @@ def _weekly_timeline_figure(modules: List[Any]):
     if df.empty:
         return None
 
+    # "single" mode: every row gets the same constant value in an internal
+    # (non-c(), never shown as a column label) grouping column, so Plotly
+    # only ever has one color to cycle through - paired with
+    # color_discrete_sequence=[accent], every bar (and the absence overlay)
+    # renders in the theme's own accent color instead of one-color-per-
+    # course. "multi" keeps the previous per-course coloring, just using
+    # the individual course (not its type) as the color key, so "each
+    # module gets a different color" is literal, not grouped by Modultyp.
+    if color_mode == "single":
+        color_column = "_color_group"
+        df[color_column] = "single"
+        theme = THEME_TOKENS.get(st.session_state.get("ui_theme", "light"), THEME_TOKENS["light"])
+        resolved_sequence = [theme["accent"]]
+    else:
+        color_column = c("module")
+        resolved_sequence = color_sequence
+
     fig = px.timeline(
         df,
         x_start=c("start"),
         x_end=c("end"),
         y=c("weekday"),
-        color=c("type"),
+        color=color_column,
+        color_discrete_sequence=resolved_sequence,
         text="short_label",
         pattern_shape="exam",
         pattern_shape_map={True: "/", False: ""},
@@ -2200,13 +2274,17 @@ def _weekly_timeline_figure(modules: List[Any]):
     fig.update_traces(textposition="inside", insidetextanchor="start", textfont_size=11)
 
     # Combining `color` with `pattern_shape` makes Plotly Express create one
-    # trace per (type, exam) pair, auto-named "Wahlpflichtmodul, False" /
+    # trace per (color, exam) pair, auto-named "Wahlpflichtmodul, False" /
     # "..., True" - the raw boolean leaking into the legend text. The
     # pattern is meant as an extra visual cue on the bars themselves (see
     # docstring), not a second legend dimension, so trace names are
-    # trimmed back down to just the type, and any duplicate that creates
-    # (the same type appearing as both exam and non-exam) is hidden from
-    # the legend rather than shown twice for the same color.
+    # trimmed back down to just the color value, and any duplicate that
+    # creates (the same color appearing as both exam and non-exam) is
+    # hidden from the legend rather than shown twice. In single-color mode
+    # the "color value" is always the same constant, so this also collapses
+    # every trace down to nothing worth showing - the legend is turned off
+    # entirely below instead, since a one-entry legend reading "single"
+    # would be pure noise.
     _seen_legend_names: set[str] = set()
 
     def _dedupe_legend_name(trace):
@@ -2221,7 +2299,8 @@ def _weekly_timeline_figure(modules: List[Any]):
         margin=dict(l=10, r=10, t=20, b=10),
         xaxis_title=t("chart.xaxis_time"),
         yaxis_title="",
-        legend_title_text=t("chart.legend_module_type"),
+        showlegend=(color_mode != "single"),
+        legend_title_text=t("chart.legend_modules"),
     )
     fig.update_xaxes(tickformat="%H:%M")
     return _apply_chart_theme(fig)
@@ -2274,10 +2353,21 @@ def _busiest_weekday(modules: List[Any]) -> tuple[str | None, int]:
 
 
 def _overlap_bar_figure(summary_df: pd.DataFrame, color_scale: str = "Reds"):
-    """Horizontal bar chart of the top 12 most-overlapping modules (from
-    _calculate_module_overlap_summary), colored by overlap percentage so
-    both absolute minutes and relative severity are visible at once. Chart
-    height scales with the number of bars shown so labels stay readable.
+    """Horizontal bar chart of the top 12 most-overlapping COURSES (one row
+    per course now that _calculate_module_overlap_summary aggregates at
+    course level, not per raw session row), colored by overlap percentage
+    so both absolute minutes and relative severity are visible at once.
+
+    Readability adjustments made after this chart was reported as too
+    small/cramped to read at a glance: a taller per-bar height (was tuned
+    for many thin per-session rows; a handful of per-course rows can afford
+    much more room each), the exact overlap value printed directly on each
+    bar instead of being hover-only (direct labeling - see the dataviz
+    "labels beat legends/tooltips for non-expert audiences" principle),
+    `automargin` on the course-name axis so long titles are never clipped
+    instead of guessing a fixed left margin, and the largest overlap sorted
+    to the top of the chart (reversed y-axis) matching the "biggest first"
+    reading order most dashboards use for a ranked list.
 
     `color_scale`: a Plotly continuous-scale name (see
     CONTINUOUS_COLOR_SCALES) - unlike the other charts this one colors by a
@@ -2289,13 +2379,21 @@ def _overlap_bar_figure(summary_df: pd.DataFrame, color_scale: str = "Reds"):
     fig = px.bar(
         top,
         x=c("overlap_total_min"),
-        y=c("module"),
+        y=c("base_course"),
         orientation="h",
         title=t("chart.overlap_title"),
         color=c("overlap_pct"),
         color_continuous_scale=color_scale,
+        text=c("overlap_total_min"),
     )
-    fig.update_layout(height=max(440, 32 * len(top) + 140), margin=dict(l=10, r=10, t=40, b=10))
+    # "auto" (not "outside"): this chart lives in a half-width dashboard
+    # column, so the longest bar can reach close to the plot's right edge -
+    # forcing every label "outside" clipped that one off-screen. "auto"
+    # lets Plotly fall back to placing a label *inside* its own bar
+    # whenever there isn't room to the right, instead of cutting it off.
+    fig.update_traces(texttemplate="%{text} min", textposition="auto", textfont_size=12)
+    fig.update_yaxes(autorange="reversed", automargin=True)
+    fig.update_layout(height=max(440, 52 * len(top) + 140), margin=dict(l=10, r=70, t=40, b=10))
     return _apply_chart_theme(fig)
 
 
@@ -3097,7 +3195,7 @@ def render_sidebar() -> None:
             # toggle triggers - there's nothing else to "apply" here.
             dark_mode = st.toggle(
                 t("sidebar.theme_dark_toggle"),
-                value=st.session_state.get("ui_theme", "dark") == "dark",
+                value=st.session_state.get("ui_theme", "light") == "dark",
                 key="sidebar_theme_toggle",
                 help=t("sidebar.theme_help"),
             )
@@ -3179,7 +3277,6 @@ def render_dashboard(modules: List) -> None:
 
     st.caption(t("dashboard.caption"))
 
-    total_ects = sum(m.ects for m in modules)
     total_modules = len(modules)
     unique_days = len(set(_weekday_label(m) for m in modules))
     total_pruefungen = sum(1 for m in modules if getattr(m, "ist_pruefung", False))
@@ -3191,14 +3288,19 @@ def render_dashboard(modules: List) -> None:
     absence_selected_df = _absence_conflict_dataframe(modules, absence_settings)
 
     with card("dash-metrics", "📊", t("dashboard.section.metrics")):
-        col1, col2, col3, col4 = st.columns(4)
+        # No ECTS-total tile here on purpose: the source data's ECTS values
+        # aren't reliable/trackable yet (see data_loader.py - a missing ECTS
+        # column is silently defaulted to 0), so showing a "total ECTS"
+        # number could look authoritative while actually being wrong or
+        # incomplete. Hidden for now, not deleted - re-add
+        # `st.metric(t("dashboard.metric.ects"), total_ects)` (and widen this
+        # back to 4 columns) once ECTS tracking is actually trustworthy.
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric(t("dashboard.metric.ects"), total_ects)
-        with col2:
             st.metric(t("dashboard.metric.rows"), total_modules)
-        with col3:
+        with col2:
             st.metric(t("dashboard.metric.base_courses"), selected_base_count)
-        with col4:
+        with col3:
             st.metric(t("dashboard.metric.exams"), total_pruefungen)
 
         col5, col6 = st.columns(2)
@@ -3309,9 +3411,12 @@ def render_dashboard(modules: List) -> None:
             modules,
             show_weekday_filter=True,
             extra_options={
+                # st.radio (inside _render_chart_toolbar) defaults to the
+                # first option, so "split by module" listed first here is
+                # what makes it the default view for this chart.
                 "view_mode": [
-                    (t("chart.view_total"), "total"),
                     (t("chart.view_by_module"), "split"),
+                    (t("chart.view_total"), "total"),
                 ]
             },
         )
@@ -3360,6 +3465,7 @@ def render_dashboard(modules: List) -> None:
                 width="stretch",
                 column_config={
                     c("duration_min"): st.column_config.NumberColumn(c("duration_min"), format="%d min"),
+                    c("occurrences"): st.column_config.NumberColumn(c("occurrences"), width="small"),
                     c("overlap_total_min"): st.column_config.NumberColumn(c("overlap_total_min"), format="%d min"),
                     c("overlap_pct"): st.column_config.NumberColumn(c("overlap_pct"), format="%.1f %%"),
                 },
@@ -3389,12 +3495,33 @@ def render_timetable(modules: List) -> None:
     with card("timetable-chart", "🗓️", t("timetable.section.chart")):
         st.caption(t("timetable.caption"))
 
+        # Same "🎨 Diagramm-Einstellungen" toolbar pattern the Dashboard
+        # charts already use (weekday filter + an extra chart-specific
+        # choice) - this chart previously had none at all, with a fixed,
+        # non-configurable "color by module type" scheme. `extra_options`
+        # adds the "Einfarbig"/"Mehrfarbig" choice; weekday filtering lets
+        # a student temporarily hide days they don't care about right now.
+        # filtered_modules feeds both the stat row below and the chart
+        # itself, so the two always agree on what's currently shown.
+        filtered_modules, palette, extra_choices = _render_chart_toolbar(
+            "timetable_chart",
+            modules,
+            show_weekday_filter=True,
+            extra_options={
+                "color_mode": [
+                    (t("chart.color_mode_multi"), "multi"),
+                    (t("chart.color_mode_single"), "single"),
+                ]
+            },
+        )
+        color_mode = extra_choices.get("color_mode", "multi")
+
         # "At a glance" stat row, computed from the same slot aggregation
         # the chart itself uses (_weekly_timeline_slots) - answers "how
         # busy is a typical week" in three numbers before the student has
         # to read the chart at all, per the "what must they understand in
         # 5 seconds" dashboard-design principle.
-        slots = _weekly_timeline_slots(modules)
+        slots = _weekly_timeline_slots(filtered_modules)
         if slots:
             weekday_counts: dict[str, int] = {}
             total_minutes = 0
@@ -3415,7 +3542,7 @@ def render_timetable(modules: List) -> None:
                     help=t("timetable.summary.busiest_day_help", count=weekday_counts[busiest_day]),
                 )
 
-        fig = _weekly_timeline_figure(modules)
+        fig = _weekly_timeline_figure(filtered_modules, color_mode=color_mode, color_sequence=palette)
         if fig is not None:
             st.plotly_chart(fig, use_container_width=True)
 
