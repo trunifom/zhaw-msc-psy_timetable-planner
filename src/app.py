@@ -3366,10 +3366,15 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 
 def render_sidebar() -> None:
     """
-    Renders the sidebar: appearance controls, UI language switch, the main
-    file upload, the optional Zusatzmodule upload for Passerelle students
-    (see docs/planung/KONZEPT-passerelle-zusatzmodule.md), and (once data
-    exists) the export section.
+    Renders the sidebar, top to bottom: appearance controls, the UI
+    language switch (its own card - kept separate from the file uploads
+    below so it reads as "a setting", not "part of the Master upload"),
+    the Master-module course-list upload ("Kursliste Mastermodule" - the
+    file every MSc Psychology student needs), the optional Bachelor
+    course-list upload for Passerelle students (see
+    docs/planung/KONZEPT-passerelle-zusatzmodule.md - explicitly worded to
+    make clear it only applies to a small group), and (once data exists)
+    the export section.
 
     Side effects on st.session_state: ui_theme (from the appearance
     toggle), ui_language (from the language selectbox), and - indirectly,
@@ -3396,7 +3401,7 @@ def render_sidebar() -> None:
             )
             st.session_state.ui_theme = "dark" if dark_mode else "light"
 
-        with card("sidebar-data", "📁", t("sidebar.section.data")):
+        with card("sidebar-language", "🌐", t("sidebar.section.language")):
             language_options = {
                 t("sidebar.language_option.de"): "de",
                 t("sidebar.language_option.en"): "en",
@@ -3407,8 +3412,12 @@ def render_sidebar() -> None:
                 options=list(language_options.keys()),
                 index=["de", "en", "fr"].index(st.session_state.get("ui_language", "de")),
                 key="sidebar_language_selector",
+                help=t("sidebar.language_help"),
             )
             st.session_state.ui_language = language_options[selected_language]
+
+        with card("sidebar-data", "📁", t("sidebar.section.data")):
+            st.caption(t("sidebar.data_description"))
 
             uploaded_file = st.file_uploader(
                 t("sidebar.upload_label"),
