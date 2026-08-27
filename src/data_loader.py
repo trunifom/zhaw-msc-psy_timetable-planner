@@ -35,7 +35,7 @@ from typing import List, Dict, Any
 from pydantic import ValidationError
 
 # Assuming ZHAWModule is a Pydantic BaseModel defined in models.py
-from models import ZHAWModule
+from models import ZHAWModule, Weekday
 
 # ==========================================
 # 1. LOGGING CONFIGURATION
@@ -535,8 +535,23 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame, ist_zusatzmodul: bool = F
     # weekday column as long as it has dates.
     if "wochentag" not in df.columns and "datum" in df.columns:
         logger.info("No weekday column found. Deriving 'wochentag' from 'datum'.")
-        weekday_names = ["montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag"]
+        # `Weekday`'s declaration order (models.py) is Monday..Sunday, i.e.
+        # already aligned with Python's date.weekday() (0=Monday..6=Sunday)
+        # - derived from the enum itself, not a second hardcoded list, so
+        # the two can't drift apart if Weekday is ever changed.
+        weekday_names = [w.value for w in Weekday]
         parsed_dates = pd.to_datetime(df["datum"].apply(_parse_datum_cell), errors="coerce")
+        unparseable_dates = int(df["datum"].notna().sum() - parsed_dates.notna().sum())
+        if unparseable_dates > 0:
+            # These rows can't be salvaged (wochentag is a required field
+            # with no safe default to invent) and will be dropped during
+            # row validation below - logged distinctly here since the
+            # resulting per-row ValidationError further down only reports
+            # "wochentag invalid", not *why* the derivation failed.
+            logger.warning(
+                f"{unparseable_dates} row(s) have a 'datum' value that could not be parsed, "
+                "so no 'wochentag' could be derived for them; those rows will be dropped."
+            )
         df["wochentag"] = parsed_dates.dt.weekday.apply(
             lambda w: weekday_names[int(w)] if pd.notna(w) else None
         )

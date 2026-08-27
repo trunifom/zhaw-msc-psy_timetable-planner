@@ -521,12 +521,32 @@ def init_session_state() -> None:
     """
     if 'raw_data' not in st.session_state:
         st.session_state.raw_data = None
+    if 'raw_data_file_id' not in st.session_state:
+        # Streamlit's own UploadedFile.file_id (a stable per-upload
+        # identifier), used to detect "is this actually a new file" - see
+        # the guard in render_sidebar(). Deliberately NOT derived from
+        # str(raw_data): stringifying the parsed dataframe's cell *values*
+        # and substring-checking the filename against that almost never
+        # matches (the filename isn't part of the data), so that older
+        # heuristic silently never skipped reprocessing.
+        st.session_state.raw_data_file_id = None
     if 'processed_modules_main' not in st.session_state:
         st.session_state.processed_modules_main = []
     if 'raw_data_zusatz' not in st.session_state:
         st.session_state.raw_data_zusatz = None
+    if 'raw_data_zusatz_file_id' not in st.session_state:
+        st.session_state.raw_data_zusatz_file_id = None
     if 'processed_modules_zusatz' not in st.session_state:
         st.session_state.processed_modules_zusatz = []
+    if 'zusatz_uploader_version' not in st.session_state:
+        # Bumped whenever the main upload is removed, to force the
+        # Zusatzmodule st.file_uploader widget to remount under a fresh key
+        # (Streamlit has no other way to programmatically clear an
+        # already-attached file from a widget) - otherwise it would still
+        # be holding its previously attached file on the very same rerun
+        # and immediately reprocess/repopulate it, defeating the "remove
+        # main file = full reset" behavior below.
+        st.session_state.zusatz_uploader_version = 0
     if 'processed_modules' not in st.session_state:
         # Derived: processed_modules_main + processed_modules_zusatz, see
         # _recompute_combined_modules(). Kept as its own key (rather than
@@ -783,12 +803,14 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
     """
     raw_data_key = "raw_data_zusatz" if ist_zusatzmodul else "raw_data"
     modules_key = "processed_modules_zusatz" if ist_zusatzmodul else "processed_modules_main"
+    file_id_key = "raw_data_zusatz_file_id" if ist_zusatzmodul else "raw_data_file_id"
 
     try:
         # Determine file type and parse accordingly
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
             st.session_state[raw_data_key] = df
+            st.session_state[file_id_key] = uploaded_file.file_id
             st.session_state[modules_key] = load_schedule_from_dataframe(df, ist_zusatzmodul=ist_zusatzmodul)
             _recompute_combined_modules()
             st.session_state.selected_modules = []
@@ -823,6 +845,7 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
                     continue
 
                 st.session_state[raw_data_key] = candidate_df
+                st.session_state[file_id_key] = uploaded_file.file_id
                 st.session_state[modules_key] = processed_modules
                 _recompute_combined_modules()
                 st.session_state.selected_modules = []
@@ -1639,11 +1662,21 @@ def _has_undistinguished_parallel_offerings(items: List[Any]) -> bool:
     text says group assignment is only published later, e.g. via Eventoweb/
     myZHAW) - it only detects it, so the caller can surface a hint instead
     of silently going on as if nothing were ambiguous.
+
+    `_weekday_label()` is included in the signature alongside `datum`
+    (rather than relying on `datum` alone) so that two rows which both
+    happen to lack a parsed date (e.g. both went through the "kept without
+    a date" retry in data_loader.py) aren't mistaken for the same slot just
+    because `None == None` - they still need to plausibly fall on the same
+    day to count as "parallel", mirroring the same-occurrence rule
+    `_same_occurrence_context()`/`scheduler._same_occurrence()` already use
+    elsewhere in this app.
     """
     seen_signatures: set[tuple] = set()
     for item in items:
         signature = (
             getattr(item, "datum", None),
+            _weekday_label(item),
             item.startzeit,
             item.endzeit,
             str(getattr(item, "modul_nr", "") or ""),
@@ -3360,19 +3393,20 @@ def render_sidebar() -> None:
             )
 
             if uploaded_file is not None:
-                # Only trigger processing if a new file is uploaded or state is empty.
-                # Streamlit reruns this function on every interaction (including
-                # ones unrelated to the uploader, e.g. toggling a checkbox
-                # elsewhere), and st.file_uploader keeps returning the same
-                # UploadedFile on every rerun as long as the widget still shows
-                # it - so without this guard we'd re-parse the file on every
-                # single rerun. `uploaded_file.name not in str(st.session_state.
-                # raw_data)` is an intentionally cheap heuristic: stringifying
-                # the cached raw dataframe and substring-checking the new
-                # file's name against it is enough to detect "this is a
-                # different file than what we already parsed" without storing
-                # a separate filename field in session state.
-                if st.session_state.raw_data is None or uploaded_file.name not in str(st.session_state.raw_data):
+                # Only trigger processing if this is actually a new file.
+                # Streamlit reruns this function on every interaction
+                # (including ones unrelated to the uploader, e.g. toggling a
+                # checkbox elsewhere), and st.file_uploader keeps returning
+                # the same UploadedFile on every rerun as long as the widget
+                # still shows it - so without this guard we'd re-parse the
+                # file (and re-fire the success toast, and reset the
+                # selection) on every single rerun. Compares Streamlit's own
+                # UploadedFile.file_id (a stable per-upload identifier) - an
+                # earlier version compared `uploaded_file.name` against
+                # `str(st.session_state.raw_data)` (the stringified parsed
+                # dataframe's cell *values*), which almost never contains the
+                # filename and so never actually skipped reprocessing.
+                if st.session_state.raw_data_file_id != uploaded_file.file_id:
                     with st.spinner(t("sidebar.parsing")):
                         handle_file_upload(uploaded_file)
             else:
@@ -3383,13 +3417,24 @@ def render_sidebar() -> None:
                 # "remove the main file" is treated as "start over"
                 # end-to-end, same as before this feature existed.
                 st.session_state.raw_data = None
+                st.session_state.raw_data_file_id = None
                 st.session_state.processed_modules_main = []
                 st.session_state.raw_data_zusatz = None
+                st.session_state.raw_data_zusatz_file_id = None
                 st.session_state.processed_modules_zusatz = []
                 st.session_state.processed_modules = []
                 st.session_state.conflicts = []
                 st.session_state.selected_modules = []
                 st.session_state.selected_course_bases = []
+                # Force the Zusatzmodule uploader widget below to remount
+                # under a fresh key THIS SAME rerun (see
+                # init_session_state()'s docstring for zusatz_uploader_
+                # version) - otherwise it would still be holding its
+                # previously attached file, immediately re-enter the "new
+                # file" branch below (since raw_data_zusatz_file_id was just
+                # cleared above), and repopulate processed_modules_zusatz
+                # right back, silently undermining this "full reset".
+                st.session_state.zusatz_uploader_version += 1
 
         with card("sidebar-data-zusatz", "🎓", t("sidebar.section.zusatzmodule")):
             st.caption(t("sidebar.zusatzmodule.description"))
@@ -3398,16 +3443,13 @@ def render_sidebar() -> None:
                 t("sidebar.zusatzmodule.upload_label"),
                 type=["csv", "xlsx", "xls"],
                 help=t("sidebar.zusatzmodule.upload_help"),
-                key="sidebar_upload_zusatz",
+                key=f"sidebar_upload_zusatz_{st.session_state.zusatz_uploader_version}",
             )
 
             if uploaded_file_zusatz is not None:
-                # Same "only reprocess a genuinely new file" guard as the
-                # main uploader above, mirrored against raw_data_zusatz.
-                if (
-                    st.session_state.raw_data_zusatz is None
-                    or uploaded_file_zusatz.name not in str(st.session_state.raw_data_zusatz)
-                ):
+                # Same file_id-based "only reprocess a genuinely new file"
+                # guard as the main uploader above.
+                if st.session_state.raw_data_zusatz_file_id != uploaded_file_zusatz.file_id:
                     with st.spinner(t("sidebar.parsing")):
                         handle_file_upload(uploaded_file_zusatz, ist_zusatzmodul=True)
             else:
@@ -3417,6 +3459,7 @@ def render_sidebar() -> None:
                 # source and recombine from whatever main data remains.
                 if st.session_state.raw_data_zusatz is not None or st.session_state.processed_modules_zusatz:
                     st.session_state.raw_data_zusatz = None
+                    st.session_state.raw_data_zusatz_file_id = None
                     st.session_state.processed_modules_zusatz = []
                     _recompute_combined_modules()
                     st.session_state.selected_modules = []
