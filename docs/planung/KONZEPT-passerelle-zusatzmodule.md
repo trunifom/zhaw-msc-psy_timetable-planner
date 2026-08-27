@@ -1,12 +1,12 @@
 # Konzept: Zusatzmodule für Passerellen-Studierende
 
-Status: **Konzept / noch nicht implementiert.** Dieses Dokument beschreibt eine geplante Erweiterung, aber keine Zeile Code dazu wurde bisher geschrieben (Ausnahme: die Testdaten in [tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx](../tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx), siehe Abschnitt 9). Ziel ist, dass eine künftige Umsetzung dieses Dokument direkt als Arbeitsgrundlage nehmen kann.
+Status: **Konzept / noch nicht implementiert.** Dieses Dokument beschreibt eine geplante Erweiterung, aber keine Zeile Code dazu wurde bisher geschrieben (Ausnahme: die Testdaten in [tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx](../../tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx), siehe Abschnitt 9). Ziel ist, dass eine künftige Umsetzung dieses Dokument direkt als Arbeitsgrundlage nehmen kann.
 
 ## 1. Ausgangslage
 
 Ein kleiner Teil der MSc-Psychologie-Studierenden kommt über eine **Passerelle** von einer anderen Hochschule oder aus einem anderen Studiengang und muss laut individuellem Studienplan in bestimmten Semestern **zusätzliche Module** absolvieren, um fehlende fachliche Grundlagen nachzuholen. Diese Zusatzmodule stammen in der Regel **nicht** aus dem MSc-Vorlesungsverzeichnis, sondern aus einem separaten Verzeichnis - im vom Nutzer bereitgestellten Beispiel konkret aus dem **Bachelor-Vorlesungsverzeichnis** Angewandte Psychologie.
 
-Aktuell unterstützt das Tool genau **einen** Excel-/CSV-Upload (`st.session_state.raw_data`/`processed_modules`, siehe [src/app.py](../src/app.py) `render_sidebar()`/`handle_file_upload()`). Eine Passerellen-Studentin müsste die zwei Listen also entweder:
+Aktuell unterstützt das Tool genau **einen** Excel-/CSV-Upload (`st.session_state.raw_data`/`processed_modules`, siehe [src/app.py](../../src/app.py) `render_sidebar()`/`handle_file_upload()`). Eine Passerellen-Studentin müsste die zwei Listen also entweder:
 
 - manuell in Excel zusammenführen, bevor sie sie hochlädt (genau die Arbeit, die dieses Tool eigentlich abnehmen soll), oder
 - nur eine der beiden Listen hochladen und die andere komplett manuell im Kopf/auf Papier verwalten - mit dem Risiko, Kollisionen zwischen Haupt- und Zusatzmodulen gar nicht erst zu bemerken.
@@ -15,7 +15,7 @@ Aktuell unterstützt das Tool genau **einen** Excel-/CSV-Upload (`st.session_sta
 
 ## 2. Kompatibilitätsanalyse der Beispieldaten
 
-Das ist der wichtigste Teil dieses Konzepts, weil er entscheidet, wie viel *neue* Logik überhaupt nötig ist. Die Spalten der vom Nutzer bereitgestellten Beispieldatei wurden direkt gegen die bestehende Normalisierungs-Pipeline geprüft (`_normalize_columns`/`COLUMN_ALIASES`/`_try_reheader_from_rows` in [src/data_loader.py](../src/data_loader.py)).
+Das ist der wichtigste Teil dieses Konzepts, weil er entscheidet, wie viel *neue* Logik überhaupt nötig ist. Die Spalten der vom Nutzer bereitgestellten Beispieldatei wurden direkt gegen die bestehende Normalisierungs-Pipeline geprüft (`_normalize_columns`/`COLUMN_ALIASES`/`_try_reheader_from_rows` in [src/data_loader.py](../../src/data_loader.py)).
 
 ### 2.1 Spaltenvergleich
 
@@ -47,7 +47,7 @@ modul_nr, kurs_nr, modulname, pruefung_flag, modultyp
 
 Die Bachelor-Exportvorlage scheint (zumindest im vorliegenden Beispiel) **keine separate Wochentagsspalte** zu führen, sondern nur ein Datum. Das ist mit der aktuellen `HEADER_REQUIRED_COLUMNS = {"wochentag", "startzeit", "endzeit"}`-Regel unvereinbar.
 
-**Vorschlag:** In `load_schedule_from_dataframe()` (nach `_normalize_columns()`, vor dem Pflichtspalten-Check) eine neue Regel ergänzen: *Wenn `datum` vorhanden ist, aber `wochentag` fehlt, wird `wochentag` automatisch aus `datum` abgeleitet* (Pythons `date.weekday()` bzw. das bereits vorhandene `Weekday`-Enum in [src/models.py](../src/models.py)). Das ist unabhängig vom `datum`-Zelltyp machbar, da `_sanitize_dataframe()` `datum` ohnehin schon vor der Validierung robust parst.
+**Vorschlag:** In `load_schedule_from_dataframe()` (nach `_normalize_columns()`, vor dem Pflichtspalten-Check) eine neue Regel ergänzen: *Wenn `datum` vorhanden ist, aber `wochentag` fehlt, wird `wochentag` automatisch aus `datum` abgeleitet* (Pythons `date.weekday()` bzw. das bereits vorhandene `Weekday`-Enum in [src/models.py](../../src/models.py)). Das ist unabhängig vom `datum`-Zelltyp machbar, da `_sanitize_dataframe()` `datum` ohnehin schon vor der Validierung robust parst.
 
 Das ist bewusst **keine Passerellen-spezifische Sonderregel**, sondern eine allgemeine Robustheitsverbesserung der Importpipeline - sie würde jeder hochgeladenen Datei zugutekommen, die (aus welchem Grund auch immer) keine separate Wochentagsspalte mitbringt, nicht nur der Zusatzmodul-Liste. Mit dieser einen Änderung lädt die in Abschnitt 9 angelegte Testdatei bereits vollständig durch, ohne dass sonst irgendetwas an der Kernpipeline angepasst werden müsste.
 
@@ -55,11 +55,11 @@ Das ist bewusst **keine Passerellen-spezifische Sonderregel**, sondern eine allg
 
 Im vom Nutzer bereitgestellten Beispiel (Kurs "F1-1 Quantitative Methoden 1") teilen sich mehrere Zeilen exakt denselben Termin (gleiches Datum, gleiche Zeit), unterscheiden sich aber in der Lehrperson - erkennbar an sechs verschiedenen Namen für denselben Slot. Das ist vermutlich keine gemeinsame Ko-Dozentur (wie das bestehende `"Name A & Name B"`-Muster im Hauptdatensatz), sondern **mehrere parallele, alternative Gruppen** desselben Kurses, von denen eine Studentin nur **eine** besucht.
 
-Das ist in der neu angelegten Testdatei bewusst nachgebildet (Modul `PF3`, zwei Termine à 6 "parallele" Zeilen) - **nicht um es zu lösen**, sondern um es beim Implementieren testbar zu machen. Siehe Abschnitt 8 (offene Fragen) für die Konsequenz: das könnte je nach genauer Funktionsweise von `find_time_conflicts()`/`_module_signature()` in [src/scheduler.py](../src/scheduler.py) zu falsch-positiven Konflikten führen, wenn alle Parallelgruppen-Zeilen unverändert importiert werden.
+Das ist in der neu angelegten Testdatei bewusst nachgebildet (Modul `PF3`, zwei Termine à 6 "parallele" Zeilen) - **nicht um es zu lösen**, sondern um es beim Implementieren testbar zu machen. Siehe Abschnitt 8 (offene Fragen) für die Konsequenz: das könnte je nach genauer Funktionsweise von `find_time_conflicts()`/`_module_signature()` in [src/scheduler.py](../../src/scheduler.py) zu falsch-positiven Konflikten führen, wenn alle Parallelgruppen-Zeilen unverändert importiert werden.
 
 ## 3. Datenmodell-Erweiterung
 
-Ein neues, optionales Feld auf `ZHAWModule` ([src/models.py](../src/models.py)):
+Ein neues, optionales Feld auf `ZHAWModule` ([src/models.py](../../src/models.py)):
 
 ```python
 ist_zusatzmodul: bool = Field(default=False, description="True fuer Module aus einer separat hochgeladenen Zusatzmodul-/Passerellen-Liste.")
@@ -75,15 +75,15 @@ ist_zusatzmodul: bool = Field(default=False, description="True fuer Module aus e
 
 ### 4.1 Zweiter Upload
 
-Neue, eigene Karte in der Sidebar (im bestehenden Card-Design-System, siehe `card()`-Helper in [src/app.py](../src/app.py)), z. B. **"🎓 Zusatzmodule"**, unterhalb der bestehenden "Daten und Sprache"-Karte. Standardmässig sichtbar, aber bewusst als **eigener, klar abgegrenzter Bereich** gestaltet statt in den Haupt-Uploader integriert - das betrifft nur eine Minderheit der Nutzer:innen, und die grosse Mehrheit soll dadurch keine zusätzliche Verwirrung im Hauptablauf erleben (progressive disclosure, siehe [[ux-clarity-patterns]] aus der letzten Session). Kurzer Erklärtext direkt an der Karte: *"Nur nötig, falls du laut Studienplan zusätzliche Module aus einem anderen Studiengang/einer anderen Hochschule besuchen musst (z. B. Passerelle)."*
+Neue, eigene Karte in der Sidebar (im bestehenden Card-Design-System, siehe `card()`-Helper in [src/app.py](../../src/app.py)), z. B. **"🎓 Zusatzmodule"**, unterhalb der bestehenden "Daten und Sprache"-Karte. Standardmässig sichtbar, aber bewusst als **eigener, klar abgegrenzter Bereich** gestaltet statt in den Haupt-Uploader integriert - das betrifft nur eine Minderheit der Nutzer:innen, und die grosse Mehrheit soll dadurch keine zusätzliche Verwirrung im Hauptablauf erleben (progressive disclosure, siehe [[ux-clarity-patterns]] aus der letzten Session). Kurzer Erklärtext direkt an der Karte: *"Nur nötig, falls du laut Studienplan zusätzliche Module aus einem anderen Studiengang/einer anderen Hochschule besuchen musst (z. B. Passerelle)."*
 
 Gleiche Ladepipeline wie beim Hauptupload (`load_schedule_from_dataframe`, inkl. Multi-Sheet-Versuch bei Excel), nur mit `ist_zusatzmodul=True`. Ergebnis landet in einem eigenen Session-State-Key (z. B. `st.session_state.processed_modules_zusatz`), wird aber **sofort** mit der Hauptliste zu einer kombinierten `processed_modules`-Liste zusammengeführt - alle nachgelagerten Komponenten (Konfliktanalyse, geführte Planung, Dashboard, Export) kennen weiterhin nur **eine** flache Modulliste und müssen dafür nicht angepasst werden; sie müssen nur das neue `ist_zusatzmodul`-Feld für Anzeige/Filterung auswerten, wo sinnvoll.
 
-**Konfliktprüfung über beide Listen hinweg ist zwingend** - eine Passerellen-Studentin braucht genau zu wissen, ob ein Zusatzmodul mit einem MSc-Pflichtmodul kollidiert. Da `find_time_conflicts()` ([src/scheduler.py](../src/scheduler.py)) ohnehin nur eine flache Modulliste entgegennimmt, ist das automatisch der Fall, sobald die Listen wie oben beschrieben zusammengeführt werden - keine Änderung an der Konfliktlogik selbst nötig.
+**Konfliktprüfung über beide Listen hinweg ist zwingend** - eine Passerellen-Studentin braucht genau zu wissen, ob ein Zusatzmodul mit einem MSc-Pflichtmodul kollidiert. Da `find_time_conflicts()` ([src/scheduler.py](../../src/scheduler.py)) ohnehin nur eine flache Modulliste entgegennimmt, ist das automatisch der Fall, sobald die Listen wie oben beschrieben zusammengeführt werden - keine Änderung an der Konfliktlogik selbst nötig.
 
 ### 4.2 Visuelle Kennzeichnung
 
-Der bestehende `badge()`-Helper (kleine farbcodierte Pille, siehe [src/app.py](../src/app.py)) ist genau für diesen Zweck gebaut und kann direkt wiederverwendet werden - z. B. ein Badge **"🎓 Zusatzmodul"** überall dort, wo Modulzeilen tabellarisch dargestellt werden:
+Der bestehende `badge()`-Helper (kleine farbcodierte Pille, siehe [src/app.py](../../src/app.py)) ist genau für diesen Zweck gebaut und kann direkt wiederverwendet werden - z. B. ein Badge **"🎓 Zusatzmodul"** überall dort, wo Modulzeilen tabellarisch dargestellt werden:
 
 - geführte Planung (Auswahltabelle, Schritt 3/4)
 - Rohdaten-Tab ("Ausgewählte Termine"-Tabelle)
@@ -102,7 +102,7 @@ Optionale, **nur sichtbare KPI-Kachel**, wenn tatsächlich eine Zusatzliste hoch
 
 ### 4.5 Export
 
-- **ICS:** Die bestehende, bereits reichhaltige Ereignisbeschreibung (Dozent:in, Modul-/Kurs-Nr., Modulart, ECTS, Anwesenheitspflicht, siehe [src/export.py](../src/export.py)) bekommt eine zusätzliche Zeile "Zusatzmodul (Passerelle)", wenn `ist_zusatzmodul=True`.
+- **ICS:** Die bestehende, bereits reichhaltige Ereignisbeschreibung (Dozent:in, Modul-/Kurs-Nr., Modulart, ECTS, Anwesenheitspflicht, siehe [src/export.py](../../src/export.py)) bekommt eine zusätzliche Zeile "Zusatzmodul (Passerelle)", wenn `ist_zusatzmodul=True`.
 - **Excel:** eine zusätzliche Spalte "Quelle" mit den Werten "Hauptliste"/"Zusatzmodul".
 
 ## 5. Datenfluss (Übersicht)
@@ -132,13 +132,13 @@ Der entscheidende Architekturpunkt: **alles unterhalb der kombinierten Liste ble
 
 | Datei | Änderung |
 |---|---|
-| [src/models.py](../src/models.py) | Neues Feld `ist_zusatzmodul: bool = False` auf `ZHAWModule` |
-| [src/data_loader.py](../src/data_loader.py) | Neuer Parameter `ist_zusatzmodul: bool = False` an `load_schedule_from_dataframe()`; neue "Wochentag aus Datum ableiten"-Regel (siehe 2.2) |
-| [src/app.py](../src/app.py) | Neuer Upload-Widget + Session-State (`processed_modules_zusatz` o. ä.); Merge-Logik beim Hochladen; Badge-Anzeige an den in 4.2 genannten Stellen; neuer Filter in `render_guided_planning()`; optionale Dashboard-Kachel |
-| [src/export.py](../src/export.py) | Quelle-Hinweis in ICS-Beschreibung; Excel-Spalte "Quelle" |
-| [src/i18n.py](../src/i18n.py) | ~15-20 neue Keys (DE/EN/FR) für Upload-Label/-Hilfetext, Badge-Text, Filter-Label, KPI-Titel, Export-Spalten-/Beschreibungstext |
-| [README.md](../README.md) | Neuer Abschnitt zur Zusatzmodul-Funktion |
-| [docs/TESTING-README.md](TESTING-README.md) | Neue Fixture-Datei dokumentieren (siehe Abschnitt 9), neue Tests auflisten |
+| [src/models.py](../../src/models.py) | Neues Feld `ist_zusatzmodul: bool = False` auf `ZHAWModule` |
+| [src/data_loader.py](../../src/data_loader.py) | Neuer Parameter `ist_zusatzmodul: bool = False` an `load_schedule_from_dataframe()`; neue "Wochentag aus Datum ableiten"-Regel (siehe 2.2) |
+| [src/app.py](../../src/app.py) | Neuer Upload-Widget + Session-State (`processed_modules_zusatz` o. ä.); Merge-Logik beim Hochladen; Badge-Anzeige an den in 4.2 genannten Stellen; neuer Filter in `render_guided_planning()`; optionale Dashboard-Kachel |
+| [src/export.py](../../src/export.py) | Quelle-Hinweis in ICS-Beschreibung; Excel-Spalte "Quelle" |
+| [src/i18n.py](../../src/i18n.py) | ~15-20 neue Keys (DE/EN/FR) für Upload-Label/-Hilfetext, Badge-Text, Filter-Label, KPI-Titel, Export-Spalten-/Beschreibungstext |
+| [README.md](../../README.md) | Neuer Abschnitt zur Zusatzmodul-Funktion |
+| [docs/TESTING-README.md](../TESTING-README.md) | Neue Fixture-Datei dokumentieren (siehe Abschnitt 9), neue Tests auflisten |
 
 Bewusst **nicht** angefasst: `src/scheduler.py`s Kernlogik (`find_time_conflicts`) - sie braucht keine Änderung, solange die Parallelgruppen-Frage aus Abschnitt 8 vor der Umsetzung geklärt ist (die Lösung dafür liegt eher in der Datenaufbereitung als im Konfliktalgorithmus selbst).
 
@@ -147,7 +147,7 @@ Bewusst **nicht** angefasst: `src/scheduler.py`s Kernlogik (`find_time_conflicts
 - Neue Fixture-Datei bereits angelegt (Abschnitt 9); zusätzliche narrow Unit-Tests in `tests/test_data_loader.py` für: Wochentag-Ableitung aus Datum, korrektes Setzen von `ist_zusatzmodul` je nach Upload-Pfad, Merge-Verhalten (Zusatzmodule tauchen in der kombinierten Liste auf, Hauptmodule bleiben unverändert).
 - Neuer Test in `tests/test_scheduler.py`: Konflikt zwischen einem Haupt- und einem Zusatzmodul wird erkannt (End-to-End über `find_time_conflicts()`).
 - **Kritisches Abnahmekriterium:** Ohne Zusatz-Upload verhält sich die App exakt wie heute - bestehende 146 Tests müssen unverändert grün bleiben, keine bestehende Funktion darf sich für die grosse Mehrheit ohne Passerellen-Hintergrund verändern.
-- Manuelle Browser-Verifikation (wie bei allen bisherigen UI-Änderungen in diesem Projekt Standard, siehe [docs/TESTING-README.md](TESTING-README.md) "What isn't covered") nötig für: Badge-Darstellung, neuen Filter, ggf. Diagramm-Anpassungen - das sind UI-Aspekte, die die Testsuite strukturell nicht abdeckt.
+- Manuelle Browser-Verifikation (wie bei allen bisherigen UI-Änderungen in diesem Projekt Standard, siehe [docs/TESTING-README.md](../TESTING-README.md) "What isn't covered") nötig für: Badge-Darstellung, neuen Filter, ggf. Diagramm-Anpassungen - das sind UI-Aspekte, die die Testsuite strukturell nicht abdeckt.
 
 ## 8. Offene Fragen / Risiken
 
@@ -161,10 +161,10 @@ Bewusst hier aufgeführt statt stillschweigend übergangen, damit sie vor der Um
 
 ## 9. Testdaten (bereits umgesetzt)
 
-[tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx](../tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx) wurde neu angelegt - ein vollständig **fiktiver** Datensatz (erfundene Modultitel, Personennamen, Modul-/Kursnummern; keine echten ZHAW-Curriculum- oder Personendaten), der die Struktur der vom Nutzer bereitgestellten Beispieldatei nachbildet:
+[tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx](../../tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx) wurde neu angelegt - ein vollständig **fiktiver** Datensatz (erfundene Modultitel, Personennamen, Modul-/Kursnummern; keine echten ZHAW-Curriculum- oder Personendaten), der die Struktur der vom Nutzer bereitgestellten Beispieldatei nachbildet:
 
 - Gleiches Spaltenschema: `SG`, `Semester`, `Lehrperson`, `Datum`, `von`, `bis`, `Modul-Nr.`, `Kurs-Nr.`, `Anlassbezeichnung`, `Pruefung`, `Modulart`.
-- Gleicher Aufbau wie die bestehende Hauptfixture ([tests/fixtures/vorlesungsverzeichnis_fiktiv.xlsx](../tests/fixtures/vorlesungsverzeichnis_fiktiv.xlsx)): Titelbanner-Zeile + Hinweiszeile über der echten Kopfzeile, um dieselbe `_try_reheader_from_rows()`-Erkennungslogik auch für diese Dateistruktur zu testen.
+- Gleicher Aufbau wie die bestehende Hauptfixture ([tests/fixtures/vorlesungsverzeichnis_fiktiv.xlsx](../../tests/fixtures/vorlesungsverzeichnis_fiktiv.xlsx)): Titelbanner-Zeile + Hinweiszeile über der echten Kopfzeile, um dieselbe `_try_reheader_from_rows()`-Erkennungslogik auch für diese Dateistruktur zu testen.
 - Zwei fiktive Module: ein "normales" Modul mit wöchentlichen Terminen, einer Halbklassen-Teilung (zwei Parallelgruppen am selben Datum mit `- Halbklasse 1`/`- Halbklasse 2`-Suffix) und einem Prüfungstermin; ein zweites Modul, das bewusst das in 2.3 beschriebene Parallelgruppen-Muster nachbildet (sechs Zeilen mit identischem Termin, sechs unterschiedlichen, fiktiven Lehrpersonen).
 - **Enthält bewusst keine `Tag`-Spalte**, exakt wie im Nutzerbeispiel - lädt mit dem aktuellen, unveränderten `data_loader.py` daher (erwartungsgemäss) noch **nicht** erfolgreich (siehe der zitierte Fehler in Abschnitt 2.1). Das ist beabsichtigt: die Datei ist als Testfall für die in Abschnitt 2.2 vorgeschlagene "Wochentag aus Datum ableiten"-Regel gedacht, nicht als bereits heute funktionierende Datei.
 
