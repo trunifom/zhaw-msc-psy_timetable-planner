@@ -229,9 +229,9 @@ zhaw-msc-psy_timetable-planner/
 ## Troubleshooting
 
 - App startet nicht:
-	- prüfen, ob das richtige Environment aktiv ist
-	- `streamlit`, `pandas`, `plotly`, `pydantic`, `openpyxl` installiert?
-	- Fehlermeldung direkt im Terminal (nicht im Browser) geprüft? Ein fehlgeschlagener Import der Backend-Module (`data_loader`/`scheduler`/`models`/`export`) wird dort mit vollständigem Traceback protokolliert
+	- prüfen, ob das richtige Environment aktiv ist - der Terminal-Prompt sollte `(zhaw_planner_env)` zeigen, **nicht** `(base)` oder ein anderes Environment. Konkret real aufgetreten: `ImportError: numpy.core.multiarray failed to import` beim Start, mit einem Traceback-Pfad über `anaconda3\Lib\site-packages\...` (das globale `base`-Environment) statt `anaconda3\envs\zhaw_planner_env\Lib\site-packages\...` - Ursache war schlicht, dass `streamlit run` in einem Terminal mit aktivem `base`-Environment lief (dessen numpy/pandas-Installation unabhängig von diesem Projekt kaputt war), nicht ein Bug in diesem Repo. Fix: `conda activate zhaw_planner_env`, dann erst `streamlit run src/app.py` - bei jedem neuen Terminalfenster erneut nötig, `conda activate` merkt sich das nicht über Sitzungen hinweg
+	- `streamlit`, `pandas`, `plotly`, `pydantic`, `openpyxl` installiert (im **aktiven** Environment, s.o. - nicht nur irgendwo auf dem System)?
+	- Fehlermeldung direkt im Terminal (nicht im Browser) geprüft? Ein fehlgeschlagener Import der Backend-Module (`data_loader`/`scheduler`/`models`/`export`) wird dort mit vollständigem Traceback protokolliert - der Traceback-Pfad selbst verrät oft schon, welches Environment tatsächlich lief (s.o.)
 - Excel wird nicht gelesen:
 	- anderes Sheet im Export versuchen
 	- Header-Zeilen im Input prüfen
