@@ -476,14 +476,25 @@ def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # ==========================================
 # 5. MAIN DATA LOADER LOGIC
 # ==========================================
-def load_schedule_from_dataframe(raw_df: pd.DataFrame) -> List[ZHAWModule]:
+def load_schedule_from_dataframe(raw_df: pd.DataFrame, ist_zusatzmodul: bool = False) -> List[ZHAWModule]:
     """
     Main entry point for data ingestion. Takes a raw Pandas DataFrame (uploaded via UI),
-    validates its structure, sanitizes the contents, and maps it to strongly-typed 
+    validates its structure, sanitizes the contents, and maps it to strongly-typed
     Pydantic models (ZHAWModule).
 
     Args:
         raw_df (pd.DataFrame): The raw dataframe from st.file_uploader.
+        ist_zusatzmodul (bool): Tags every row produced by this call as
+            belonging to a supplementary-module upload (e.g. a Passerelle
+            student's second, Bachelor-level module list) rather than the
+            main schedule. This is set by the *caller* based on which
+            upload slot the file came from - never read from the file's own
+            content - see ZHAWModule.ist_zusatzmodul and
+            docs/planung/KONZEPT-passerelle-zusatzmodule.md section 3 for
+            why: trusting a source column here would make an app-level
+            business rule dependent on the source file reliably filling
+            that column, which the rest of this module's defensive
+            sanitizing philosophy deliberately avoids.
 
     Returns:
         List[ZHAWModule]: A list of validated module objects.
@@ -513,6 +524,23 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame) -> List[ZHAWModule]:
                 df["modulname"] = df[fallback_col]
                 break
 
+    # Some source exports (e.g. the ZHAW Bachelor-level course catalog used
+    # by Passerelle students, see docs/planung/KONZEPT-passerelle-zusatzmodule.md
+    # section 2.2) carry a date column but no separate weekday column at
+    # all - unlike the Master catalog's "Tag" column, there's no alias to
+    # match. Rather than rejecting the whole file over one derivable field,
+    # derive `wochentag` from `datum` here (before it's actually needed for
+    # anything downstream). This is a general robustness improvement, not
+    # specific to any one source format - it helps any upload missing a
+    # weekday column as long as it has dates.
+    if "wochentag" not in df.columns and "datum" in df.columns:
+        logger.info("No weekday column found. Deriving 'wochentag' from 'datum'.")
+        weekday_names = ["montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag"]
+        parsed_dates = pd.to_datetime(df["datum"].apply(_parse_datum_cell), errors="coerce")
+        df["wochentag"] = parsed_dates.dt.weekday.apply(
+            lambda w: weekday_names[int(w)] if pd.notna(w) else None
+        )
+
     # 4. Structural Validation
     current_cols = set(df.columns)
     missing_cols = REQUIRED_COLUMNS - current_cols
@@ -539,6 +567,13 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame) -> List[ZHAWModule]:
 
     # 5. Data Sanitization (Handle NaNs, cast types securely)
     df = _sanitize_dataframe(df)
+
+    # Tag every row with its origin *after* sanitization (so this can't be
+    # dropped/overwritten by anything above) and as a plain column (so both
+    # the normal and the datum-retry row_dict below - see step 6 - pick it
+    # up automatically via row.to_dict(), without needing a second call
+    # site to remember to set it).
+    df["ist_zusatzmodul"] = bool(ist_zusatzmodul)
 
     # 6. Object Mapping (DataFrame -> List[Pydantic Models])
     processed_modules: List[ZHAWModule] = []

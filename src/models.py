@@ -145,9 +145,20 @@ class ZHAWModule(BaseModel):
     )
     
     raum: Optional[str] = Field(
-        default="N/A", 
-        max_length=100, 
+        default="N/A",
+        max_length=100,
         description="Room number or building code."
+    )
+
+    ist_zusatzmodul: bool = Field(
+        default=False,
+        description=(
+            "True for modules from a separately uploaded supplementary-module "
+            "list (e.g. a Passerelle student's required Bachelor-level "
+            "modules). Not read from the source file - set by the loader "
+            "based on which upload slot the row came from, see "
+            "data_loader.load_schedule_from_dataframe()."
+        ),
     )
 
     # ==========================================

@@ -26,10 +26,10 @@ README).
 | File | Covers | Style |
 |---|---|---|
 | `tests/test_models.py` | `src/models.py` - the `ZHAWModule` Pydantic model: weekday/time/date parsing and their many accepted formats, ECTS bounds, exam-flag inference, attendance-percentage parsing, `duration_minutes`, `to_ui_dict()`. | Narrow unit tests, one `ZHAWModule` built per test via a `make_module(**overrides)` helper. |
-| `tests/test_scheduler.py` | `src/scheduler.py`'s `find_time_conflicts` - the active conflict-detection algorithm (the rest of that file is unused legacy code, see its module docstring). Overlap math, same-date vs. same-weekday matching, duplicate-row suppression, pair de-duplication. | Narrow unit tests with 2-3 hand-built modules per test. |
+| `tests/test_scheduler.py` | `src/scheduler.py`'s `find_time_conflicts` - the active conflict-detection algorithm (the rest of that file is unused legacy code, see its module docstring). Overlap math, same-date vs. same-weekday matching, duplicate-row suppression, pair de-duplication, and that a conflict between a main-list and a Zusatzmodul (Passerelle supplementary module, see `docs/planung/KONZEPT-passerelle-zusatzmodule.md`) is caught exactly like any other conflict. | Narrow unit tests with 2-3 hand-built modules per test. |
 | `tests/test_export.py` | `src/export.py`'s building blocks in isolation: RFC5545 text escaping and line folding, the dependency-free Europe/Zurich -> UTC DST conversion (including the March/October transition boundaries), UID slugification, event-title marker logic (exam / missing-date), the Excel export round-trip, and a few ICS structural edge cases (empty selection, `TRANSP` for real vs. placeholder events). | Narrow unit tests against small hand-built `ZHAWModule` lists. |
 | `tests/test_i18n.py` | `src/i18n.py` - most importantly, that the `de`/`en`/`fr` translation blocks define **exactly the same set of keys** (catches translation drift), plus `get_text()`'s fallback chain and placeholder formatting. | Consistency checks + narrow unit tests. |
-| `tests/test_data_loader.py` | The **full import pipeline** end-to-end: `data_loader.load_schedule_from_dataframe` against both fictional fixture files (header-banner detection, column aliasing incl. alternate/English headers, mixed date formats, weekday/multi-lecturer/placeholder parsing), the `MissingColumnError`/`DataLoaderError` structural-failure paths, plus regression tests for two real bugs found and fixed in this codebase (see below) and an integration check that the ICS export never silently drops a selected module. | Integration-style, built on two module-scoped fixtures loading `vorlesungsverzeichnis_fiktiv.xlsx` and `edge_cases_fiktiv.csv` once per test session. |
+| `tests/test_data_loader.py` | The **full import pipeline** end-to-end: `data_loader.load_schedule_from_dataframe` against all three fictional fixture files (header-banner detection, column aliasing incl. alternate/English headers, mixed date formats, weekday/multi-lecturer/placeholder parsing), the `MissingColumnError`/`DataLoaderError` structural-failure paths, deriving `wochentag` from `datum` when no weekday column exists at all, the `ist_zusatzmodul` flag being set correctly per upload path, plus regression tests for two real bugs found and fixed in this codebase (see below) and an integration check that the ICS export never silently drops a selected module. | Integration-style, built on module-scoped fixtures loading `vorlesungsverzeichnis_fiktiv.xlsx`, `edge_cases_fiktiv.csv`, and `vorlesungsverzeichnis_passerelle_fiktiv.xlsx` once per test session. |
 
 Rule of thumb used when writing these: if a test needs to construct a
 `ZHAWModule` directly to isolate one behaviour, it belongs in the
@@ -63,8 +63,22 @@ Two separate locations, with two very different purposes and git policies
   fixture never touches. Also covers mixed date formats in one file
   (`dd.mm.yyyy` and ISO side by side) and a genuinely blank date cell in a
   real multi-row CSV.
+- **`tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx`** - a
+  fully **fictional** Bachelor-level course catalog (26 rows), fictionalized
+  from the structure of a real ZHAW export handed to Passerelle students as
+  a second, optional upload (see `docs/planung/KONZEPT-passerelle-
+  zusatzmodule.md`). Deliberately has **no weekday column at all** (only
+  `Datum`) - by design, to exercise the "derive wochentag from datum" rule
+  in `data_loader.load_schedule_from_dataframe`. Also models two different
+  "parallel offerings at the same slot" patterns found in the real catalog:
+  module `PF3` (six lecturers, no distinguishing suffix in the title at
+  all) and module `ANW7` (three lecturers, likewise undistinguished) -
+  neither is something `data_loader.py` resolves or deduplicates; the UI
+  layer (`app._has_undistinguished_parallel_offerings`, not covered by
+  this suite - see "What isn't covered" below) only surfaces a hint about
+  the ambiguity instead of silently going on as if it weren't there.
 
-Both fixture files **are committed to git** - they contain no real
+All three fixture files **are committed to git** - they contain no real
 personal data, so there's nothing to protect.
 - **`data/real/`** - not a fixture at all: a place to drop *your own real*
   exported Excel file for manual local testing. This folder has its own
@@ -115,7 +129,11 @@ focuses on the parts that are pure, deterministic business logic
 (everything app.py delegates to `data_loader`/`models`/`scheduler`/`export`).
 Manually exercising the running app (`streamlit run src/app.py`) against
 the fixture file - or your own file in `data/real/` - remains the way to
-check the UI itself.
+check the UI itself. This includes the Zusatzmodule upload/merge feature
+(second sidebar upload, source badges in the four result tables, and the
+"undistinguished parallel offerings" hint) - verified manually via
+Playwright against the real Bachelor/Master catalogs and the fixture
+files, not by an automated test.
 
 This gap is real, not theoretical: a design-system pass on `src/app.py`
 (card-based layout, `st.column_config` table formatting, status-color

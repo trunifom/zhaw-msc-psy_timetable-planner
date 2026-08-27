@@ -69,6 +69,24 @@ def test_same_weekday_different_dates_do_not_conflict():
     assert find_time_conflicts([a, b]) == []
 
 
+def test_conflict_detected_between_main_and_zusatzmodul():
+    # See docs/planung/KONZEPT-passerelle-zusatzmodule.md section 4.1: once
+    # a Zusatzmodul (Passerelle student's supplementary module, tagged via
+    # ist_zusatzmodul=True) is merged into the same flat module list as the
+    # main schedule, find_time_conflicts() must catch a genuine overlap
+    # between the two exactly like it would between two main-list modules -
+    # no separate code path exists (or should exist) for this.
+    main_module = make_module(
+        modulname="MSc Pflichtmodul", ist_zusatzmodul=False, startzeit="08:00", endzeit="10:00"
+    )
+    zusatzmodul = make_module(
+        modulname="BSc Zusatzmodul", ist_zusatzmodul=True, startzeit="09:00", endzeit="11:00"
+    )
+    conflicts = find_time_conflicts([main_module, zusatzmodul])
+    assert len(conflicts) == 1
+    assert {conflicts[0][0].ist_zusatzmodul, conflicts[0][1].ist_zusatzmodul} == {True, False}
+
+
 def test_same_exact_date_overlap_conflicts():
     a = make_module(modulname="Modul A", datum=date(2026, 9, 14), startzeit="08:00", endzeit="10:00")
     b = make_module(modulname="Modul B", datum=date(2026, 9, 14), startzeit="09:00", endzeit="11:00")

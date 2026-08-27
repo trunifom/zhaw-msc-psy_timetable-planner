@@ -104,6 +104,18 @@ Zusätzliche Einstellungen in der Sidebar bzw. im Dashboard:
 - **Dunkles/Helles Design** (Toggle "🌙 Dunkles Design") in der eigenen "Darstellung"-Sektion ganz oben in der Sidebar, **Sprache** (de/en/fr) direkt darunter in "Daten und Sprache" - beides jederzeit umschaltbar, wirkt sofort (auch die Sidebar-Beschriftung selbst) ohne zusätzlichen Reload
 - Im Dashboard-Tab hat jedes Diagramm ein einklappbares "🎨 Diagramm-Einstellungen"-Panel: Farbpalette bzw. Farbskala wählen, einzelne Wochentage aus-/einblenden, und je nach Chart zusätzlich Farbmodus oder Ansicht umschalten. Die native Plotly-Werkzeugleiste über jedem Diagramm erlaubt zusätzlich Zoomen, Verschieben und PNG-Export
 
+## Zusatzmodule für Passerellen-Studierende
+
+Für Studierende, die laut individuellem Studienplan zusätzliche Module aus einem anderen Studiengang/einer anderen Hochschule belegen müssen (z. B. Passerelle: zusätzliche Bachelor-Module), gibt es in der Sidebar unterhalb von "Daten und Sprache" eine eigene, optionale Karte **"🎓 Zusatzmodule"** mit einem zweiten Datei-Upload. Die dort hochgeladene Liste wird automatisch mit der Hauptplanung zu einer gemeinsamen, konfliktgeprüften Liste zusammengeführt:
+
+- Module aus der Zusatzliste sind in allen Tabellen (geführte Planung, Rohdaten, Wochenplan, Konfliktanalyse) an der Spalte/Markierung "Quelle" (🎓 Zusatzmodul) erkennbar.
+- Kollisionen zwischen einem Hauptmodul und einem Zusatzmodul werden genau wie Kollisionen innerhalb der Hauptliste erkannt - es gibt keinen separaten Prüfpfad.
+- Fehlt in der hochgeladenen Zusatzliste eine Wochentag-Spalte (nur Datum vorhanden, wie bei manchen Bachelor-Exporten), wird der Wochentag automatisch aus dem Datum abgeleitet.
+- Bietet eine Zeitperiode mehrere parallele Angebote mit unterschiedlichen Dozierenden, ohne dass die Zuteilung (z. B. Halbklasse) im Export schon erkennbar ist, werden alle Angebote vorerst übernommen und mit einem Hinweis in Schritt 4 der geführten Planung sichtbar markiert, statt die Mehrdeutigkeit stillschweigend zu verstecken.
+- Wird nur die Zusatzliste wieder entfernt, bleibt die Hauptplanung unverändert bestehen; wird die Hauptdatei entfernt, wird die gesamte Planung (inkl. Zusatzmodule) zurückgesetzt.
+
+Details und der volle Umsetzungsplan: [docs/planung/KONZEPT-passerelle-zusatzmodule.md](docs/planung/KONZEPT-passerelle-zusatzmodule.md).
+
 ## Dateninput und Annahmen
 
 Die Importlogik ist tolerant gegenüber Header-Varianten und Metadatenzeilen. Zentral sind u. a.:
@@ -118,6 +130,7 @@ Hinweis:
 
 - Wenn Datum vorhanden ist, werden Konflikte datumsgenau berechnet.
 - Ohne Datum erfolgt Konfliktprüfung auf Wochentag+Zeit.
+- Fehlt die Wochentag-Spalte komplett, aber ein Datum ist vorhanden, wird der Wochentag automatisch daraus abgeleitet (nicht nur für Zusatzmodule relevant, siehe oben - hilft jedem Export ohne eigene Wochentag-Spalte).
 
 ## Konfliktlogik (wichtig)
 
@@ -161,13 +174,13 @@ pytest:
 pytest -q
 ```
 
-146 Tests über 5 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen, Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten) und zweier Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
+153 Tests über 5 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen, Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten), zweier Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden) und der Zusatzmodul-/Passerellen-Tests (Wochentag-Ableitung aus Datum, `ist_zusatzmodul`-Kennzeichnung, Konflikterkennung über Haupt- und Zusatzliste hinweg). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
 
 ## Testdaten
 
 Es gibt zwei getrennte Ordner für Testdaten:
 
-- [tests/fixtures/vorlesungsverzeichnis_fiktiv.xlsx](tests/fixtures/vorlesungsverzeichnis_fiktiv.xlsx): ein vollständig **fiktiver** Beispieldatensatz (erfundene Module, Kursnummern und Dozierendennamen) mit derselben Struktur wie ein echter ZHAW-Export (Titel-/Hinweiszeilen über der echten Kopfzeile, `N.N.`-Platzhalter, Mehrfachdozierende mit „&", wöchentlich wechselnde Zeiten, PRÜFUNG-Zeilen). Plus [tests/fixtures/edge_cases_fiktiv.csv](tests/fixtures/edge_cases_fiktiv.csv) für Grenzfälle (alternative Spaltennamen, gemischte Datumsformate, fehlendes Datum). Beide werden von den pytest-Tests verwendet und können auch manuell im Streamlit-Upload zum Ausprobieren genutzt werden. Dieser Ordner wird eingecheckt.
+- [tests/fixtures/vorlesungsverzeichnis_fiktiv.xlsx](tests/fixtures/vorlesungsverzeichnis_fiktiv.xlsx): ein vollständig **fiktiver** Beispieldatensatz (erfundene Module, Kursnummern und Dozierendennamen) mit derselben Struktur wie ein echter ZHAW-Export (Titel-/Hinweiszeilen über der echten Kopfzeile, `N.N.`-Platzhalter, Mehrfachdozierende mit „&", wöchentlich wechselnde Zeiten, PRÜFUNG-Zeilen). Plus [tests/fixtures/edge_cases_fiktiv.csv](tests/fixtures/edge_cases_fiktiv.csv) für Grenzfälle (alternative Spaltennamen, gemischte Datumsformate, fehlendes Datum) und [tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx](tests/fixtures/vorlesungsverzeichnis_passerelle_fiktiv.xlsx) für die Zusatzmodul-/Passerellen-Funktion (fiktiver Bachelor-Katalog ohne Wochentag-Spalte, inkl. zweier Parallelgruppen-Muster - siehe [docs/planung/KONZEPT-passerelle-zusatzmodule.md](docs/planung/KONZEPT-passerelle-zusatzmodule.md)). Alle drei werden von den pytest-Tests verwendet und können auch manuell im Streamlit-Upload zum Ausprobieren genutzt werden. Dieser Ordner wird eingecheckt.
 - `data/real/`: Ablageort für deine **echte** Excelliste zum lokalen Testen. Dieser Ordner ist per eigenem `.gitignore` vollständig von Git ausgeschlossen (nur `.gitkeep`/`.gitignore` selbst werden getrackt) und landet nie im Repository.
 
 Details zu Testdatenpolitik und wie man neue Testdaten ergänzt: [docs/TESTING-README.md](docs/TESTING-README.md#test-data).

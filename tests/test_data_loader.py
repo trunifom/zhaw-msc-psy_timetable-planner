@@ -199,3 +199,81 @@ def test_all_rows_invalid_raises_data_loader_error():
 
 def test_empty_dataframe_returns_empty_list_without_raising():
     assert load_schedule_from_dataframe(pd.DataFrame()) == []
+
+
+# --- Zusatzmodule / Passerelle support ---------------------------------------
+# See docs/planung/KONZEPT-passerelle-zusatzmodule.md. The fixture below
+# mirrors a real ZHAW Bachelor-level course catalog handed to Passerelle
+# students as a second, optional upload: unlike the main Master catalog
+# fixture above, it has no "Tag" (weekday) column at all - only "Datum" -
+# which is what test_weekday_is_derived_from_datum_when_column_is_missing
+# exercises. It also contains two different "parallel offerings at the same
+# slot" patterns found in the real catalog: PF3 (six lecturers, no
+# distinguishing suffix at all in the title) and the newly added ANW7 (three
+# lecturers, likewise undistinguished) - see
+# app._has_undistinguished_parallel_offerings, which is UI-layer and not
+# covered here (this project's automated tests don't cover src/app.py, see
+# docs/TESTING-README.md "What isn't covered").
+
+ZUSATZ_FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "vorlesungsverzeichnis_passerelle_fiktiv.xlsx"
+
+
+@pytest.fixture(scope="module")
+def zusatz_fixture_raw_df():
+    return pd.read_excel(ZUSATZ_FIXTURE_PATH, header=None, sheet_name="Vorlesungsverzeichnis")
+
+
+def test_zusatz_fixture_file_exists():
+    assert ZUSATZ_FIXTURE_PATH.exists()
+
+
+def test_zusatz_fixture_has_no_weekday_column_by_design(zusatz_fixture_raw_df):
+    # If this ever starts failing because someone "fixed" the fixture by
+    # adding a Tag column, the whole point of this fixture - proving the
+    # loader copes WITHOUT one - would silently stop being tested.
+    header_row = [str(v).strip().lower() for v in zusatz_fixture_raw_df.iloc[2].tolist()]
+    assert "tag" not in header_row
+    assert "datum" in header_row
+
+
+def test_weekday_is_derived_from_datum_when_column_is_missing(zusatz_fixture_raw_df):
+    from datetime import date
+
+    modules = load_schedule_from_dataframe(zusatz_fixture_raw_df, ist_zusatzmodul=True)
+    assert len(modules) == 26
+
+    by_date = {m.datum: m.wochentag.value for m in modules}
+    # 2026-09-15 is a Tuesday, 2026-09-16 a Wednesday, 2027-01-16 (PDI2's
+    # exam date) a Saturday - spot-checking three different derived
+    # weekdays across the full date range (not just "it derived
+    # *something*") guards against an off-by-one in the date.weekday() ->
+    # Weekday mapping.
+    assert by_date[date(2026, 9, 15)] == "dienstag"
+    assert by_date[date(2026, 9, 16)] == "mittwoch"
+    assert by_date[date(2027, 1, 16)] == "samstag"
+
+
+def test_ist_zusatzmodul_flag_defaults_to_false(fixture_modules):
+    # fixture_modules (the main-catalog fixture, loaded without passing
+    # ist_zusatzmodul) must never be tagged as supplementary - a caller that
+    # forgets the flag on the main upload must not silently mislabel it.
+    assert all(m.ist_zusatzmodul is False for m in fixture_modules)
+
+
+def test_ist_zusatzmodul_flag_is_set_when_requested(zusatz_fixture_raw_df):
+    modules = load_schedule_from_dataframe(zusatz_fixture_raw_df, ist_zusatzmodul=True)
+    assert modules  # sanity: the fixture actually produced rows
+    assert all(m.ist_zusatzmodul is True for m in modules)
+
+
+def test_undistinguished_parallel_offerings_all_load_as_separate_rows(zusatz_fixture_raw_df):
+    # ANW7: three rows, same date/time/module/course/title, only the
+    # lecturer differs (no "/Gruppe" style suffix anywhere) - the loader
+    # itself must not silently drop or merge these; detecting/flagging the
+    # ambiguity is app.py's job (see module docstring above), not
+    # data_loader's.
+    modules = load_schedule_from_dataframe(zusatz_fixture_raw_df, ist_zusatzmodul=True)
+    anw7 = [m for m in modules if m.modul_nr == "ANW7"]
+    assert len(anw7) == 3
+    assert len({m.dozierende for m in anw7}) == 3
+    assert len({(m.datum, m.startzeit, m.endzeit) for m in anw7}) == 1

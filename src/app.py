@@ -481,14 +481,23 @@ def init_session_state() -> None:
     script execution.
 
     Keys initialized here:
-      - raw_data: the last uploaded file's data as a raw (untransformed)
-        pandas DataFrame, kept around so render_raw_data() can show the
-        student what was actually in their upload.
-      - processed_modules: List[ZHAWModule] - the full set of validated
-        schedule rows produced by data_loader.load_schedule_from_dataframe(),
-        i.e. everything from the upload, before any user filtering/selection.
+      - raw_data / raw_data_zusatz: the last main/supplementary upload's data
+        as raw (untransformed) pandas DataFrames, kept around so
+        render_raw_data() can show the student what was actually in their
+        upload, and so the sidebar can cheaply detect "is this a new file"
+        (see handle_file_upload).
+      - processed_modules_main / processed_modules_zusatz: List[ZHAWModule]
+        each - the validated rows from the main upload and, if present, the
+        optional second "Zusatzmodule" upload for Passerelle students (see
+        docs/planung/KONZEPT-passerelle-zusatzmodule.md), kept separately so
+        removing one upload doesn't require re-parsing the other.
+      - processed_modules: List[ZHAWModule] - processed_modules_main +
+        processed_modules_zusatz, recomputed by _recompute_combined_modules()
+        whenever either source changes. Every downstream tab/chart/export
+        reads only this combined list and the per-module `ist_zusatzmodul`
+        flag - none of them need to know there are two separate uploads.
       - conflicts: cached output of scheduler.find_time_conflicts() over
-        processed_modules (recomputed on each new upload).
+        processed_modules (recomputed on each upload/removal change).
       - planning_finalized: bool gate for render_export_section() - the
         student must explicitly tick a checkbox before downloads unlock
         (see render_export_section for the rationale).
@@ -512,7 +521,17 @@ def init_session_state() -> None:
     """
     if 'raw_data' not in st.session_state:
         st.session_state.raw_data = None
+    if 'processed_modules_main' not in st.session_state:
+        st.session_state.processed_modules_main = []
+    if 'raw_data_zusatz' not in st.session_state:
+        st.session_state.raw_data_zusatz = None
+    if 'processed_modules_zusatz' not in st.session_state:
+        st.session_state.processed_modules_zusatz = []
     if 'processed_modules' not in st.session_state:
+        # Derived: processed_modules_main + processed_modules_zusatz, see
+        # _recompute_combined_modules(). Kept as its own key (rather than
+        # computed on every read) since it's what ~30 call sites across this
+        # file already read directly as "the full uploaded dataset".
         st.session_state.processed_modules = []
     if 'conflicts' not in st.session_state:
         st.session_state.conflicts = []
@@ -705,16 +724,45 @@ def _format_user_facing_error(exc: Exception) -> str:
     return str(exc)
 
 
-def handle_file_upload(uploaded_file: Any) -> None:
+def _recompute_combined_modules() -> None:
+    """
+    Rebuild the derived st.session_state.processed_modules (main + Zusatz)
+    and its cached conflicts, from the two source lists
+    (processed_modules_main, processed_modules_zusatz). Call this any time
+    either source list changes (new upload, or a file being removed) - see
+    init_session_state()'s docstring for why the combined list is kept as
+    its own key rather than recomputed ad hoc by every reader.
+    """
+    st.session_state.processed_modules = (
+        list(st.session_state.get("processed_modules_main") or [])
+        + list(st.session_state.get("processed_modules_zusatz") or [])
+    )
+    st.session_state.conflicts = find_time_conflicts(st.session_state.processed_modules)
+
+
+def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> None:
     """
     Handles the parsing of the uploaded file with comprehensive error handling.
     Supports CSV and Excel files.
 
-    Side effects (all on success): populates st.session_state.raw_data,
-    processed_modules and conflicts, resets selected_modules/
-    selected_course_bases (a new upload invalidates any prior selection made
-    against the old dataset), and shows a success toast. On failure it
-    renders an st.error()/st.info() and leaves session state untouched.
+    Args:
+        uploaded_file: the file object from st.file_uploader.
+        ist_zusatzmodul: False for the main schedule upload, True for the
+            optional second "Zusatzmodule" upload (Passerelle students'
+            supplementary Bachelor-level modules, see
+            docs/planung/KONZEPT-passerelle-zusatzmodule.md). Determines
+            both which session-state slot (raw_data/processed_modules_main
+            vs. raw_data_zusatz/processed_modules_zusatz) this upload
+            populates, and the ist_zusatzmodul tag on every resulting
+            ZHAWModule (see data_loader.load_schedule_from_dataframe).
+
+    Side effects (all on success): populates the raw_data/processed_modules
+    slot matching `ist_zusatzmodul`, recomputes the combined
+    processed_modules + conflicts (see _recompute_combined_modules()),
+    resets selected_modules/selected_course_bases (a new upload invalidates
+    any prior selection made against the old combined dataset), and shows a
+    success toast. On failure it renders an st.error()/st.info() and leaves
+    session state untouched.
 
     CSV vs. Excel handling differs deliberately:
       - CSV: there is exactly one "sheet" and pandas' default header=0
@@ -733,17 +781,20 @@ def handle_file_upload(uploaded_file: Any) -> None:
         use the first one that works. If none of them parse, we surface the
         last error we saw (or a generic "no matching sheet" error).
     """
+    raw_data_key = "raw_data_zusatz" if ist_zusatzmodul else "raw_data"
+    modules_key = "processed_modules_zusatz" if ist_zusatzmodul else "processed_modules_main"
+
     try:
         # Determine file type and parse accordingly
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
-            st.session_state.raw_data = df
-            st.session_state.processed_modules = load_schedule_from_dataframe(df)
-            st.session_state.conflicts = find_time_conflicts(st.session_state.processed_modules)
+            st.session_state[raw_data_key] = df
+            st.session_state[modules_key] = load_schedule_from_dataframe(df, ist_zusatzmodul=ist_zusatzmodul)
+            _recompute_combined_modules()
             st.session_state.selected_modules = []
             st.session_state.selected_course_bases = []
             st.toast(t("upload.success"), icon="✅")
-            _warn_if_dates_missing(st.session_state.processed_modules)
+            _warn_if_dates_missing(st.session_state[modules_key])
             return
         elif uploaded_file.name.endswith(('.xls', '.xlsx')):
             xls = pd.ExcelFile(uploaded_file)
@@ -758,7 +809,7 @@ def handle_file_upload(uploaded_file: Any) -> None:
                     continue
 
                 try:
-                    processed_modules = load_schedule_from_dataframe(candidate_df)
+                    processed_modules = load_schedule_from_dataframe(candidate_df, ist_zusatzmodul=ist_zusatzmodul)
                 except Exception as err:
                     # This sheet didn't contain a valid schedule (e.g. it's a
                     # notes/legend sheet) - remember the error in case ALL
@@ -771,13 +822,13 @@ def handle_file_upload(uploaded_file: Any) -> None:
                     last_error = err
                     continue
 
-                st.session_state.raw_data = candidate_df
-                st.session_state.processed_modules = processed_modules
-                st.session_state.conflicts = find_time_conflicts(st.session_state.processed_modules)
+                st.session_state[raw_data_key] = candidate_df
+                st.session_state[modules_key] = processed_modules
+                _recompute_combined_modules()
                 st.session_state.selected_modules = []
                 st.session_state.selected_course_bases = []
                 st.toast(t("upload.success_sheet", sheet_name=sheet_name), icon="✅")
-                _warn_if_dates_missing(st.session_state.processed_modules)
+                _warn_if_dates_missing(st.session_state[modules_key])
                 return
 
             # No sheet could be parsed into the required schema.
@@ -1425,6 +1476,7 @@ def _module_to_row(module: Any, module_id: int, selected: bool) -> dict:
         c("type"): module.modultyp,
         c("lecturers"): module.dozierende,
         c("ects"): module.ects,
+        c("source"): _zusatzmodul_marker(module),
     }
 
 
@@ -1564,6 +1616,46 @@ def _module_variant_label(module: Any) -> str:
     return variant or "STANDARD"
 
 
+def _has_undistinguished_parallel_offerings(items: List[Any]) -> bool:
+    """
+    True if `items` (rows already collapsed to a single _module_variant_label
+    - i.e. auto-included as "mandatory" in render_guided_planning's "module"
+    mode) actually contains 2+ rows at the exact same date/time/module/course
+    that only differ by dozierende (lecturer).
+
+    Real ZHAW exports sometimes offer several parallel half-class/group
+    deliveries of the same session without encoding that as a "/Gruppe A"
+    style suffix in the title at all - only the lecturer name differs (see
+    docs/planung/KONZEPT-passerelle-zusatzmodule.md section 8, risk 1; a
+    live check against the real Bachelor catalog found this in ~47% of its
+    same-slot multi-lecturer cases, vs. ~7% for the Master catalog). Because
+    _split_course_variant() has nothing to parse in the title in that case,
+    such rows all normalize to the same "STANDARD" variant and get silently
+    bundled together as if they were one mandatory session, rather than the
+    "choose one" UI a labeled variant would get.
+
+    This does NOT attempt to resolve or deduplicate that ambiguity (the
+    source data gives no reliable way to - the real export's own banner
+    text says group assignment is only published later, e.g. via Eventoweb/
+    myZHAW) - it only detects it, so the caller can surface a hint instead
+    of silently going on as if nothing were ambiguous.
+    """
+    seen_signatures: set[tuple] = set()
+    for item in items:
+        signature = (
+            getattr(item, "datum", None),
+            item.startzeit,
+            item.endzeit,
+            str(getattr(item, "modul_nr", "") or ""),
+            str(getattr(item, "kurs_nr", "") or ""),
+            str(getattr(item, "modulname", "") or ""),
+        )
+        if signature in seen_signatures:
+            return True
+        seen_signatures.add(signature)
+    return False
+
+
 def _module_course_family_key(module: Any) -> str:
     """
     Return the grouping key for one "course component/family" inside a
@@ -1606,6 +1698,20 @@ def _module_label(module: Any) -> str:
     return base
 
 
+def _zusatzmodul_marker(module: Any) -> str:
+    """
+    Text marker for the "Quelle" column shown wherever module rows are
+    tabulated: the Zusatzmodul badge text for a supplementary-list row
+    (see ZHAWModule.ist_zusatzmodul), or "" for a normal main-list row.
+    Deliberately blank (not e.g. "Hauptliste") for the common case, so a
+    student with no Zusatzmodule upload never sees this column add any
+    visual noise - it only ever shows content for the minority who
+    actually uploaded a supplementary list (see
+    docs/planung/KONZEPT-passerelle-zusatzmodule.md section 4.2).
+    """
+    return t("badge.zusatzmodul") if getattr(module, "ist_zusatzmodul", False) else ""
+
+
 def _module_to_ui_row(module: Any) -> dict:
     """Localized row representation for selected module tables."""
     datum_value = getattr(module, "datum", None)
@@ -1622,6 +1728,7 @@ def _module_to_ui_row(module: Any) -> dict:
         c("lecturers"): module.dozierende,
         c("room"): module.raum,
         c("type"): module.modultyp,
+        c("source"): _zusatzmodul_marker(module),
     }
 
 
@@ -2843,6 +2950,13 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     c("rows"): len(items),
                     c("exam_dates"): exam_count,
                     c("period"): date_range,
+                    # A module group is expected to come from exactly one
+                    # source list (main vs. Zusatzmodule) - real ZHAW
+                    # Bachelor/Master Modul-Nr namespaces don't collide (see
+                    # docs/planung/KONZEPT-passerelle-zusatzmodule.md section
+                    # 8, risk 2) - so the first row's flag represents the
+                    # whole group.
+                    c("source"): _zusatzmodul_marker(items[0]),
                 }
             )
 
@@ -2851,7 +2965,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             module_df,
             hide_index=True,
             width="stretch",
-            disabled=[c("module_group"), c("module_key"), c("courses"), c("rows"), c("exam_dates"), c("period")],
+            disabled=[c("module_group"), c("module_key"), c("courses"), c("rows"), c("exam_dates"), c("period"), c("source")],
             column_config={c("select"): st.column_config.CheckboxColumn(c("select"))},
             key="module_group_selector_editor",
         )
@@ -2904,6 +3018,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             module_selected = []
             open_choices = 0
             family_rows = []
+            ambiguous_parallel_components: list[str] = []
 
             with st.expander(t("guided.module_components_expander", module=label), expanded=False):
                 for fam_key, fam_items in sorted(families.items(), key=lambda pair: pair[0]):
@@ -2914,9 +3029,18 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     variant_names = sorted(variants.keys())
                     if len(variant_names) == 1:
                         # Single variant -> nothing to choose; auto-include
-                        # every row of this component ("mandatory").
+                        # every row of this component ("mandatory"). This can
+                        # still hide several genuinely parallel offerings
+                        # (e.g. half-classes) if the source data only tells
+                        # them apart by lecturer, not by a "/Gruppe A" style
+                        # title suffix - see _has_undistinguished_parallel_
+                        # offerings(). We can't resolve that ambiguity here
+                        # (the source data doesn't say which one the student
+                        # is actually in), so it's only flagged, not changed.
                         only_variant = variant_names[0]
                         module_selected.extend(variants[only_variant])
+                        if _has_undistinguished_parallel_offerings(variants[only_variant]):
+                            ambiguous_parallel_components.append(fam_key)
                         family_rows.append(
                             {
                                 c("course_component"): fam_key,
@@ -2962,6 +3086,13 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 st.caption(
                     t("guided.module_caption", exams=len(exam_items), open=open_choices)
                 )
+                if ambiguous_parallel_components:
+                    st.caption(
+                        "⚠️ " + t(
+                            "guided.parallel_groups_hint",
+                            components=", ".join(sorted(set(ambiguous_parallel_components))),
+                        )
+                    )
 
             selected_by_module_key[key] = module_selected
             selected_modules.extend(module_selected)
@@ -3061,6 +3192,8 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             date_range = f"{first_date} - {last_date}" if first_date and last_date else ""
             default_selected = base in selected_bases_prev
 
+            # Same "one group, one source" assumption as the "module" mode
+            # table above (items[0] is representative of the whole group).
             group_rows.append(
                 {
                     c("select"): default_selected,
@@ -3069,6 +3202,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     c("variants_count"): len(variants),
                     c("exam_dates"): exam_count,
                     c("period"): date_range,
+                    c("source"): _zusatzmodul_marker(items[0][1]),
                 }
             )
 
@@ -3077,7 +3211,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             df_groups,
             hide_index=True,
             width="stretch",
-            disabled=[c("base_course"), c("rows"), c("variants_count"), c("exam_dates"), c("period")],
+            disabled=[c("base_course"), c("rows"), c("variants_count"), c("exam_dates"), c("period"), c("source")],
             column_config={c("select"): st.column_config.CheckboxColumn(c("select"))},
             key="course_group_selector_editor",
         )
@@ -3140,6 +3274,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 c("type"),
                 c("lecturers"),
                 c("ects"),
+                c("source"),
             ],
             column_config={
                 c("select"): st.column_config.CheckboxColumn(c("select")),
@@ -3174,12 +3309,15 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 
 def render_sidebar() -> None:
     """
-    Renders the sidebar: appearance controls, UI language switch, file
-    upload, and (once data exists) the export section.
+    Renders the sidebar: appearance controls, UI language switch, the main
+    file upload, the optional Zusatzmodule upload for Passerelle students
+    (see docs/planung/KONZEPT-passerelle-zusatzmodule.md), and (once data
+    exists) the export section.
 
     Side effects on st.session_state: ui_theme (from the appearance
     toggle), ui_language (from the language selectbox), and - indirectly,
-    via handle_file_upload()/the "file removed" branch below - raw_data,
+    via handle_file_upload()/the "file removed" branches below -
+    raw_data(_zusatz), processed_modules_main/_zusatz, the derived
     processed_modules, conflicts, selected_modules and
     selected_course_bases.
     """
@@ -3238,12 +3376,51 @@ def render_sidebar() -> None:
                     with st.spinner(t("sidebar.parsing")):
                         handle_file_upload(uploaded_file)
             else:
-                # Reset state if file is removed
+                # Reset state if the main file is removed. This is a full
+                # reset, including any Zusatzmodule upload below - a
+                # Passerelle student's supplementary modules are only
+                # meaningful in the context of their main MSc schedule, so
+                # "remove the main file" is treated as "start over"
+                # end-to-end, same as before this feature existed.
                 st.session_state.raw_data = None
+                st.session_state.processed_modules_main = []
+                st.session_state.raw_data_zusatz = None
+                st.session_state.processed_modules_zusatz = []
                 st.session_state.processed_modules = []
                 st.session_state.conflicts = []
                 st.session_state.selected_modules = []
                 st.session_state.selected_course_bases = []
+
+        with card("sidebar-data-zusatz", "🎓", t("sidebar.section.zusatzmodule")):
+            st.caption(t("sidebar.zusatzmodule.description"))
+
+            uploaded_file_zusatz = st.file_uploader(
+                t("sidebar.zusatzmodule.upload_label"),
+                type=["csv", "xlsx", "xls"],
+                help=t("sidebar.zusatzmodule.upload_help"),
+                key="sidebar_upload_zusatz",
+            )
+
+            if uploaded_file_zusatz is not None:
+                # Same "only reprocess a genuinely new file" guard as the
+                # main uploader above, mirrored against raw_data_zusatz.
+                if (
+                    st.session_state.raw_data_zusatz is None
+                    or uploaded_file_zusatz.name not in str(st.session_state.raw_data_zusatz)
+                ):
+                    with st.spinner(t("sidebar.parsing")):
+                        handle_file_upload(uploaded_file_zusatz, ist_zusatzmodul=True)
+            else:
+                # Removing only the Zusatzmodule upload must not touch the
+                # main schedule (see docs/planung/KONZEPT-passerelle-
+                # zusatzmodule.md section 8, risk 3) - just drop the Zusatz
+                # source and recombine from whatever main data remains.
+                if st.session_state.raw_data_zusatz is not None or st.session_state.processed_modules_zusatz:
+                    st.session_state.raw_data_zusatz = None
+                    st.session_state.processed_modules_zusatz = []
+                    _recompute_combined_modules()
+                    st.session_state.selected_modules = []
+                    st.session_state.selected_course_bases = []
 
         if st.session_state.processed_modules:
             st.divider()
@@ -3586,6 +3763,7 @@ def render_timetable(modules: List) -> None:
                             c("room"): mod.raum,
                             c("lecturers"): mod.dozierende,
                             c("reason"): ", ".join(_absence_reasons_for_module(mod, settings)),
+                            c("source"): _zusatzmodul_marker(mod),
                         }
                         for mod in daily_mods
                     ]
@@ -3648,12 +3826,23 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
             overlap = _minutes_overlap(left, right)
             left_duration = max(1, left.duration_minutes)
             right_duration = max(1, right.duration_minutes)
+            # Prefixed onto the label rather than a separate "Quelle" column
+            # (as used elsewhere, e.g. _module_to_ui_row): this table is
+            # already wide (9 columns) and module_1/module_2 are shown
+            # side-by-side, so a prefix keeps a Zusatzmodul conflict
+            # identifiable without adding two more columns.
+            module_1_label = _module_label(left)
+            if getattr(left, "ist_zusatzmodul", False):
+                module_1_label = f"🎓 {module_1_label}"
+            module_2_label = _module_label(right)
+            if getattr(right, "ist_zusatzmodul", False):
+                module_2_label = f"🎓 {module_2_label}"
             conflict_rows.append(
                 {
                     c("date"): _conflict_date_label(left),
                     c("weekday"): _weekday_label(left),
-                    c("module_1"): _module_label(left),
-                    c("module_2"): _module_label(right),
+                    c("module_1"): module_1_label,
+                    c("module_2"): module_2_label,
                     c("time_1"): f"{left.startzeit.strftime('%H:%M')} - {left.endzeit.strftime('%H:%M')}",
                     c("time_2"): f"{right.startzeit.strftime('%H:%M')} - {right.endzeit.strftime('%H:%M')}",
                     c("overlap_min"): overlap,
