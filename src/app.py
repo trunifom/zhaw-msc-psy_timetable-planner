@@ -2159,6 +2159,15 @@ def _weekly_timeline_figure(modules: List[Any]):
     settings = _absence_settings()
     overlay_df = _absence_overlay_for_week(settings)
     if not overlay_df.empty:
+        # overlay_df (synthetic "blocked" bars, not real modules) only has
+        # the original columns from _absence_overlay_for_week() - it never
+        # goes through _weekly_timeline_slots(), so the extra columns added
+        # to `rows` above (short_label/exam/occurrences/period) don't exist
+        # on it yet. pd.concat() would otherwise fill them with NaN, which
+        # would show up as a literal "nan" in the bar text/hover - filled in
+        # explicitly instead with values that make sense for a synthetic
+        # bar: its own label as the on-bar text, never an exam, exactly one
+        # "occurrence" (it's not a real recurring session), no date range.
         overlay_df = overlay_df.copy()
         overlay_df["short_label"] = overlay_df[c("module")]
         overlay_df["exam"] = False
@@ -3251,6 +3260,12 @@ def render_dashboard(modules: List) -> None:
             fig = _weekday_bar_figure(weekday_modules, color_sequence=weekday_palette)
             if fig is not None:
                 st.plotly_chart(fig, use_container_width=True)
+                # The chart's one-sentence "headline" (see _busiest_weekday's
+                # docstring) - states the takeaway directly instead of
+                # leaving a non-technical reader to compare bar heights
+                # themselves. Computed from weekday_modules (the toolbar's
+                # filtered set), so it always matches what the chart above
+                # it actually shows, even when weekdays are filtered out.
                 busiest_day, busiest_count = _busiest_weekday(weekday_modules)
                 if busiest_day:
                     st.caption(t("dashboard.chart.weekday_insight", day=busiest_day, count=busiest_count))
@@ -3546,6 +3561,12 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
                 )
                 fig.update_layout(height=max(420, 44 * len(top_conflicts) + 120), margin=dict(l=10, r=10, t=40, b=10))
                 st.plotly_chart(_apply_chart_theme(fig), use_container_width=True)
+                # top_conflicts is always capped at 8 rows (see .head(8)
+                # above) so the bar chart stays readable - but a silent cap
+                # looks like "these are all the conflicts" to someone who
+                # doesn't know the code. Only surfaced when the cap actually
+                # cut something, so the common case (<=8 conflicts) stays
+                # caption-free.
                 if len(conflict_df) > len(top_conflicts):
                     st.caption(t("chart.conflict_top_truncated", shown=len(top_conflicts), total=len(conflict_df)))
 
@@ -3621,6 +3642,12 @@ def render_raw_data() -> None:
     col1, col2 = st.columns([1.1, 0.9])
     with col1:
         with card("raw-original", "🗄️", t("raw.original").strip("*")):
+            # Unlike the truncated tables elsewhere in the app (e.g. the
+            # absence "all data" tables), raw_df is shown in full - no
+            # .head() cap here. The row count is still worth stating
+            # explicitly though, so a student importing a large export can
+            # confirm "yes, all my rows made it in" at a glance instead of
+            # having to scroll and count.
             st.caption(t("raw.row_count", count=len(raw_df)))
             st.dataframe(raw_df, width="stretch", hide_index=True)
 
@@ -3631,6 +3658,14 @@ def render_raw_data() -> None:
         if st.session_state.get("selected_modules"):
             with card("raw-selected", "✅", t("raw.selected").strip("*")):
                 sel_df = pd.DataFrame([_module_to_ui_row(m) for m in st.session_state.selected_modules])
+                # column_config here matches the convention used for every
+                # other module-derived table in this file (Dashboard/
+                # Wochenplan/Konfliktanalyse all format their date/time/
+                # number columns) - this used to be the one exception,
+                # showing a plain ISO date string and unformatted numbers
+                # instead. _module_to_ui_row() now returns a real `date`
+                # object for c("date") (not a pre-formatted string) so
+                # DateColumn can actually parse and reformat it.
                 st.dataframe(
                     sel_df,
                     width="stretch",

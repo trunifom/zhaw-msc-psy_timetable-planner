@@ -29,19 +29,20 @@ Besonders unterstützt werden:
 	- Paar-Zusammenfassung
 	- Detailansicht nach Datum und Uhrzeit
 	- Überlappungsminuten und Prozentwerten
-- Design-System (durchgängig auf allen 5 Tabs plus Sidebar, Light/Dark umschaltbar über die Sidebar):
+- Design-System (durchgängig auf allen 5 Tabs plus Sidebar, Light/Dark umschaltbar über eine eigene "Darstellung"-Sektion in der Sidebar):
 	- einheitliche Karten-Sektionen (Icon + Titel + Trennlinie) statt reiner Whitespace-Trennung
 	- konsistente Semantikfarben (Erfolg/Warnung/Kritisch/Info) über die ganze App, sowohl als Badges/Zeilenfärbung in Tabellen als auch in Charts
 	- Tabellen mit typisierten Spalten (`st.column_config`): formatierte Datum-/Zeit-/Zahlenspalten statt Rohstrings, Status-Spalten farbcodiert, Überlappungs-/Risikowerte als sequenzieller Rot-Verlauf (abhängigkeitsfrei implementiert, siehe Troubleshooting)
-	- ECTS-Fortschrittsbalken im Dashboard (Ziel-ECTS vs. aktuelle Auswahl)
-	- Wochenplan-Tab als Tabelle statt Fliesstext (Zeit/Modul/Typ/Raum/Dozierende/Grund je Wochentag)
+	- **ZHAW Corporate Design**: Titel/Akzentfarbe (aktiver Tab, Steuerelemente) und die Standard-Diagrammpalette nutzen offizielle ZHAW-CI-Farben statt generischer Plotly-/UI-Töne, Schriftfamilie orientiert sich an der ZHAW-Hausschrift (Helvetica-Neue-Fallback-Stack, lizenzbedingt keine echte Einbindung möglich). Details und die Gründe hinter der konkreten Farbauswahl siehe die Kommentare über `THEME_TOKENS`/`CHART_PALETTES_LIGHT`/`CHART_PALETTES_DARK` in `src/app.py`
+	- Wochenplan-Tab als Tabelle statt Fliesstext (Datum/Zeit/Modul/Typ/Raum/Dozierende/Grund je Wochentag)
 - Visualisierung (Dashboard-Charts sind interaktiv anpassbar über ein "🎨 Diagramm-Einstellungen"-Panel):
-	- Wochen-Timeline
+	- Wochen-Timeline im Wochenplan-Tab ("typische Woche" nach Uhrzeit statt Kalenderdatum): mehrfach wiederkehrende Termine am selben Wochentag/derselben Uhrzeit werden zu einem Balken zusammengefasst (statt mehrerer deckungsgleicher Balken), Kursname direkt auf dem Balken sichtbar (nicht nur im Hover), Prüfungstermine zusätzlich zur Farbe mit Schraffur markiert, Hover zeigt Anzahl Termine und Datumsbereich; darüber eine "Wochenübersicht auf einen Blick" (Termine/Woche, Stunden/Woche, dichtester Tag)
 	- Semester-Timeline (Farbe wählbar nach Modul oder Modulart)
 	- Tageslast über den gesamten Zeitraum (Gesamt- oder nach Modul aufgeschlüsselte Ansicht)
-	- Wochentagsverteilung
+	- Wochentagsverteilung mit automatischem Hinweis auf den dichtesten Tag ("📌 Freitag ist dein dichtester Tag mit X Terminen")
 	- pro Chart: Farbpalette (inkl. farbenblind-sicher) bzw. Farbskala wählbar, Wochentage ein-/ausblendbar, native Plotly-Werkzeugleiste (Zoom, Pan, PNG-Export)
 	- einheitlicher, theme-abhängiger Chart-Hintergrund (transparent, folgt Light/Dark) über alle Tabs hinweg
+- Übersichtlichkeit für Einsteiger:innen: positiv formulierte Erfolgsmeldung bei konfliktfreier Auswahl ("🎉 Keine Zeitkonflikte..."), sichtbarer Hinweis wenn eine Grafik/Tabelle aus Platzgründen nur einen Ausschnitt zeigt (z. B. "Zeigt die 8 grössten von X Konflikten"), Dashboard zeigt bei Abwesenheitskonflikten nur den Status der aktuellen Auswahl und verweist für die volle Aufschlüsselung auf den Konfliktanalyse-Tab statt dieselbe Tabelle doppelt anzuzeigen
 - Export:
 	- XLSX
 	- ICS (alle aktuell ausgewählten Termine, chronologisch sortiert):
@@ -100,7 +101,7 @@ streamlit run src/app.py
 
 Zusätzliche Einstellungen in der Sidebar bzw. im Dashboard:
 
-- **Sprache** (de/en/fr) und **Dunkles/Helles Design** (Toggle "🌙 Dunkles Design") oben in der Sidebar, jederzeit umschaltbar
+- **Dunkles/Helles Design** (Toggle "🌙 Dunkles Design") in der eigenen "Darstellung"-Sektion ganz oben in der Sidebar, **Sprache** (de/en/fr) direkt darunter in "Daten und Sprache" - beides jederzeit umschaltbar, wirkt sofort (auch die Sidebar-Beschriftung selbst) ohne zusätzlichen Reload
 - Im Dashboard-Tab hat jedes Diagramm ein einklappbares "🎨 Diagramm-Einstellungen"-Panel: Farbpalette bzw. Farbskala wählen, einzelne Wochentage aus-/einblenden, und je nach Chart zusätzlich Farbmodus oder Ansicht umschalten. Die native Plotly-Werkzeugleiste über jedem Diagramm erlaubt zusätzlich Zoomen, Verschieben und PNG-Export
 
 ## Dateninput und Annahmen
@@ -175,6 +176,8 @@ Details zu Testdatenpolitik und wie man neue Testdaten ergänzt: [docs/TESTING-R
 
 ```text
 zhaw-msc-psy_timetable-planner/
+├── .streamlit/
+│   └── config.toml        (primaryColor fuer native Streamlit-Widgets, siehe Troubleshooting)
 ├── data/
 │   └── real/              (git-ignoriert, fuer deine echte Excelliste)
 ├── docs/
@@ -221,6 +224,8 @@ zhaw-msc-psy_timetable-planner/
 - Eine Fehlermeldung in der App ist zu knapp, um das Problem zu verstehen:
 	- im Terminal-Log nachsehen (siehe "Fehlerbehandlung und Logging") – dort steht bei unerwarteten Fehlern der vollständige Python-Traceback, bei erwarteten Datenproblemen (z. B. eine fehlgeschlagene Zeilenvalidierung) eine genauere Meldung inkl. Zeilennummer
 - Warum kein `matplotlib` als Abhängigkeit: die farbig hinterlegten Überlappungs-/Risikowerte in den Tabellen sehen aus wie pandas' `Styler.background_gradient()`, sind aber bewusst selbst gebaut (`_style_sequential_red` in `src/app.py`) – `background_gradient()` bricht sonst beim ersten Zugriff mit `ImportError: background_gradient requires matplotlib.` ab, da `matplotlib` nirgends in `requirements.txt`/`environment.yaml` steht. Beim Ergänzen neuer farbcodierter Tabellen bitte diese Funktion wiederverwenden statt `background_gradient()` neu einzuführen
+- `.streamlit/config.toml` (setzt `primaryColor` auf ZHAW Blau, damit native Streamlit-Steuerelemente wie Radio-Buttons/Checkboxen/Toggles/Buttons nicht mehr Streamlits Standard-Rot verwenden) wird nur erkannt, wenn es relativ zum **Arbeitsverzeichnis der Shell** beim Start liegt – also im Repo-Root, wenn wie dokumentiert per `streamlit run src/app.py` **aus dem Repo-Root** gestartet wird. Ein Start via `cd src && streamlit run app.py` (Arbeitsverzeichnis wäre dann `src/`) findet die Datei nicht und die Steuerelemente fallen zurück auf Streamlits Standardfarbe – falls Buttons/Radios plötzlich wieder rot statt ZHAW-blau erscheinen, zuerst das Arbeitsverzeichnis beim Start prüfen, nicht den Farbwert
+- Farben/Kontraste stimmen für ein bestimmtes UI-Element (Button, Tabelle, Dropdown, Chart-Text) nach einem Theme-Wechsel nicht: `_inject_design_system_css()` in `src/app.py` deckt Streamlits native Widgets nur ab, wenn sie dort explizit per CSS-Selektor angesprochen werden (`.stButton`, `.stTextInput input`, `[data-baseweb="select"]` usw.) – ein neuer, noch nicht dort erfasster Widget-Typ fällt sonst auf Streamlits eigenes, vom App-Theme-Toggle unabhängiges natives Erscheinungsbild zurück. Bei einem neuen Widget-Typ in der UI immer in beiden Themes im Browser gegenprüfen, nicht nur im Code lesen (siehe auch "What isn't covered" in [docs/TESTING-README.md](docs/TESTING-README.md))
 
 ## Datenschutz
 

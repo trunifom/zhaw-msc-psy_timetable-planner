@@ -21,6 +21,13 @@ st.subheader(t("dashboard.subheader"))
 df = pd.DataFrame([{c("metric"): "...", c("value"): 42}])
 ```
 
+The same `c(...)` pattern is also used for Plotly `hover_data` columns, not
+just `st.dataframe` tables: Plotly Express auto-labels a hover field with
+the DataFrame column's own name, so naming that column `c("occurrences")`/
+`c("period")` (rather than a raw internal name) makes the tooltip label
+translated for free, with no separate `hovertemplate` needed. See
+`_weekly_timeline_figure()` in `src/app.py` for an example.
+
 ## Key Naming Rules
 - Keep keys stable and lowercase.
 - Use namespaces:

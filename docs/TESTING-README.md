@@ -139,10 +139,36 @@ catch, all only found by actually loading the fixture file in a browser:
   (dark text on near-black-red). Fixed by flipping to white text past the
   ratio midpoint in `_style_sequential_red()`.
 
+A later manual pass (switching UI language back and forth, then a ZHAW
+corporate-design/contrast pass) found three more of the same kind:
+
+- Switching the sidebar language selector left the labels positioned
+  *before* the selectbox in the script (sidebar header, card titles, the
+  theme-toggle label) stuck in the old language for one extra rerun, while
+  everything rendered after that point already showed the new language -
+  same root cause and same fix pattern as the dark/light toggle bug above
+  (read the widget's own frontend-updated session_state key at the very
+  top of the script, before any `t()` call depends on the derived value).
+  See the `sidebar_language_selector` block near the top of `src/app.py`.
+- Download buttons (Excel/ICS export) rendered with a dark background and
+  dark, barely-readable text in light mode - they were relying on
+  Streamlit's own native button styling, which (like the input widgets
+  above) is decoupled from this app's light/dark toggle unless explicitly
+  covered by `_inject_design_system_css()`. Fixed by giving `.stButton`/
+  `.stDownloadButton` the same `--zp-*` tokens as inputs and cards.
+- Combining Plotly's `color=` and `pattern_shape=` on the weekly timeline
+  chart (used to give exam sessions a texture, not just a color) made
+  Plotly Express auto-name each legend entry `"{type}, {examBool}"`,
+  leaking a literal "False" into labels like "Wahlpflichtmodul, False".
+  Fixed in `_weekly_timeline_figure()` by trimming trace names back down
+  to just the color value via `fig.for_each_trace(...)` and hiding the
+  resulting duplicate legend entries. Worth remembering if `pattern_shape`
+  is ever combined with `color` on another chart in this file.
+
 None of these can get an automated regression test under the current
 "app.py is UI-only, untested" policy - they're recorded here instead so
 the same mistakes aren't repeated. If `src/app.py` ever grows a browser-
-based test harness (e.g. Streamlit's `AppTest`), these three are the first
+based test harness (e.g. Streamlit's `AppTest`), these are the first
 candidates to convert into real regression tests.
 
 ## Adding new tests
