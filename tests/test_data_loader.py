@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import pandas as pd
@@ -8,6 +9,32 @@ from export import generate_ics_download
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "vorlesungsverzeichnis_fiktiv.xlsx"
 EDGE_CASE_FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "edge_cases_fiktiv.csv"
+
+
+def test_load_schedule_from_dataframe_accepts_ist_zusatzmodul_keyword():
+    """
+    Directly, explicitly pins the exact signature app.py's handle_file_
+    upload() relies on - a crash reported live against a running instance
+    of this app ("load_schedule_from_dataframe() got an unexpected
+    keyword argument 'ist_zusatzmodul'") turned out to be caused by that
+    instance running a stale copy of this file from before the
+    Zusatzmodule feature existed (see docs/planung git history / the
+    session that added ist_zusatzmodul - commit de8fb8a), not a bug in
+    the code itself. This test can't detect *that* class of problem (a
+    stale process elsewhere reading different bytes off disk than pytest
+    is) - nothing running inside this repo's own test suite can - but it
+    does pin the contract so this specific regression can never again
+    happen from an actual code change in this repo without a test
+    failing immediately.
+    """
+    signature = inspect.signature(load_schedule_from_dataframe)
+    assert "ist_zusatzmodul" in signature.parameters
+    assert signature.parameters["ist_zusatzmodul"].default is False
+
+    # And actually call it with the keyword, on a trivial empty frame -
+    # the concrete, behavioural version of the check above.
+    result = load_schedule_from_dataframe(pd.DataFrame(), ist_zusatzmodul=True)
+    assert result == []
 
 
 @pytest.fixture(scope="module")
