@@ -173,6 +173,13 @@ Bewusst hier aufgeführt statt stillschweigend übergangen, damit sie vor der Um
 - **Enthält bewusst keine `Tag`-Spalte**, exakt wie im echten Bachelor-Export - diente ursprünglich als Testfall für die in Abschnitt 2.2 vorgeschlagene "Wochentag aus Datum ableiten"-Regel (damals noch nicht implementiert, daher noch nicht ladbar) und lädt seit Phase 1 erfolgreich (26 Module, siehe `tests/test_data_loader.py`).
 - **Update (Phase 1):** um ein drittes Modul `ANW7` (3 Zeilen, identischer Termin, drei fiktive Lehrpersonen, **keine** unterscheidende Anlassbezeichnung) ergänzt - bildet das in Abschnitt 8/Risiko 1 beschriebene, gegen die echte Bachelor-Liste bestätigte "unmarkierte Parallelgruppe"-Muster nach (im Unterschied zum bereits vorhandenen `PF3`-Muster, das ebenfalls keine Suffixe hat, aber schon vor Phase 1 angelegt wurde). Damit sind jetzt beide realen Parallelgruppen-Varianten (mit und ohne "Gruppe X"-Suffix) als Fixture abgedeckt.
 
+**Update (nach Phase 2, auf expliziten Nutzerwunsch):** die obige Handarbeits-Fixture wurde um sechs weitere, deutlich umfangreichere Testdaten ergänzt - siehe [tests/fixtures/generate_fictional_fixtures.py](../../tests/fixtures/generate_fictional_fixtures.py) und [docs/TESTING-README.md](../TESTING-README.md#test-data) für die volle Beschreibung:
+
+- **Vollständig fiktionalisierte Originalkataloge** ([vorlesungsverzeichnis_bsc_vollstaendig_fiktiv.xlsx](../../tests/fixtures/vorlesungsverzeichnis_bsc_vollstaendig_fiktiv.xlsx), 1182 Zeilen; [vorlesungsverzeichnis_msc_vollstaendig_fiktiv.xlsx](../../tests/fixtures/vorlesungsverzeichnis_msc_vollstaendig_fiktiv.xlsx), 343 Zeilen) - die *gesamten* echten HS26-Verzeichnisse, Zeile für Zeile fiktionalisiert (deterministisches Mapping für Lehrperson/Modul-Nr./Kurs-Nr./Anlassbezeichnung, Datum/Zeit/Modulart/Semester unverändert), statt nur eine Handvoll von Hand ausgewählter Zeilen - deckt die reale Grössenordnung und Vielfalt ab, gegen die Phase 1/2 bereits verifiziert wurden.
+- **Von Hand konstruierte Szenario-Paare** (nicht aus echten Daten abgeleitet, da ein echter - auch fiktionalisierter - Katalog eine konkrete Bedingung wie "diese zwei Zeilen müssen sich überschneiden" nicht zuverlässig garantieren kann): ein Konflikt-Szenario (garantierte Zeitüberschneidung zwischen Haupt- und Zusatzmodul plus ein garantiert nicht überschneidendes Paar) und ein Modul-Nr.-Kollisions-Szenario (siehe Risiko 2 unten).
+
+Neue, dedizierte Testdatei dafür: [tests/test_zusatzmodule_fixtures.py](../../tests/test_zusatzmodule_fixtures.py) (32 Tests) - siehe TESTING-README für Details.
+
 ## 10. Empfohlene Umsetzungsreihenfolge
 
 **Phase 1 (MVP) - umgesetzt:**
