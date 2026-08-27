@@ -1,6 +1,6 @@
 # Konzept: Zusatzmodule für Passerellen-Studierende
 
-Status: **Phase 1 (MVP) umgesetzt.** Die in Abschnitt 10 beschriebene Phase 1 (Wochentag-Ableitung, `ist_zusatzmodul`-Feld, zweiter Upload + Merge, Konfliktprüfung über die kombinierte Liste, Badge-Anzeige, Tests) ist implementiert und gegen die realen Excellisten des Nutzers (Bachelor- und Master-Vorlesungsverzeichnis HS26, lokal in `data/real/`, nicht im Repo) end-to-end verifiziert. Phase 2 (Filter "nur Zusatzmodule", Dashboard-KPI, Export-Kennzeichnung) und Phase 3 sind noch offen. Siehe Abschnitt 8 für die konkrete, gegen echte Daten geprüfte Auflösung von Risiko 1 (Parallelgruppen).
+Status: **Phase 1 (MVP) und Phase 2 umgesetzt.** Phase 1 (Wochentag-Ableitung, `ist_zusatzmodul`-Feld, zweiter Upload + Merge, Konfliktprüfung über die kombinierte Liste, Badge-Anzeige, Tests) ist implementiert, gegen die realen Excellisten des Nutzers (Bachelor- und Master-Vorlesungsverzeichnis HS26, lokal in `data/real/`, nicht im Repo) end-to-end verifiziert und nach Abschluss nochmals per unabhängiger Code-Review überprüft (zwei echte Bugs in der Sidebar-Logik gefunden und gefixt, siehe Git-Historie). Phase 2 (Filter "nur Zusatzmodule" in Schritt 2, Dashboard-KPI-Kachel, Export-Kennzeichnung in ICS/Excel) ist ebenfalls umgesetzt. Phase 3 (optionales `herkunfts_semester`-Feld, eigene Farbcodierung) ist noch offen. Siehe Abschnitt 8 für die konkrete, gegen echte Daten geprüfte Auflösung von Risiko 1 (Parallelgruppen).
 
 ## 1. Ausgangslage
 
@@ -183,10 +183,10 @@ Bewusst hier aufgeführt statt stillschweigend übergangen, damit sie vor der Um
 5. ✅ Badge-Anzeige ("Quelle"-Spalte bzw. Präfix, da der bestehende `badge()`-Helper HTML ist und in `st.dataframe`/`st.data_editor`-Zellen nicht rendert - abweichend von der ursprünglichen Annahme in 4.2) in allen 4 genannten Tabellen plus der Modul-/Kurs-Auswahltabelle in Schritt 3.
 6. ✅ Neue Tests (`tests/test_data_loader.py`, `tests/test_scheduler.py`, total 153 statt 146) + Dokumentation (README.md, docs/TESTING-README.md) + manuelle Playwright-Verifikation (Upload, Merge, Badges, Hinweis, Light/Dark).
 
-**Phase 2:**
-- Filter "nur Zusatzmodule" in der geführten Planung.
-- Dashboard-KPI-Kachel.
-- Export-Kennzeichnung (ICS-Beschreibung, Excel-Spalte).
+**Phase 2 - umgesetzt:**
+1. ✅ Filter "Alle anzeigen" / "Nur Zusatzmodule" / "Zusatzmodule ausblenden" in Schritt 2 der geführten Planung (nur sichtbar, wenn tatsächlich eine Zusatzliste hochgeladen wurde).
+2. ✅ Dashboard-KPI-Kachel "Zusatzmodule ausgewählt" (ebenfalls nur bei vorhandener Zusatzliste, zählt die Zusatzmodule in der aktuellen Auswahl, nicht in der Gesamtliste).
+3. ✅ Export-Kennzeichnung: ICS-Beschreibung bekommt eine Zeile "Zusatzmodul (Passerelle)"; Excel-Export bekommt eine Spalte "Quelle" ("Hauptliste"/"Zusatzmodul"). Beides hartkodiert Deutsch statt über i18n-Keys, da `export.py` konsistent zum Rest der Datei keine i18n-Abhängigkeit hat (die dafür ursprünglich in Phase 1 angelegten `source.main`/`source.zusatzmodul`-i18n-Keys wurden als unbenutzt wieder entfernt).
 
 **Phase 3 (optional, nur falls gewünscht):**
 - `herkunfts_semester`-Feld zur Anzeige der `Semester`-Spalte.

@@ -198,6 +198,13 @@ def _event_description(module: Any, has_date: bool) -> str:
         lines.append(f"Anwesenheitspflicht: {attendance}%")
     if ist_pruefung:
         lines.append("Pruefung: Ja")
+    if getattr(module, "ist_zusatzmodul", False):
+        # See docs/planung/KONZEPT-passerelle-zusatzmodule.md section 4.5 -
+        # a Passerelle student's supplementary-module sessions look
+        # identical to their main-list sessions once exported into a
+        # calendar app, so this line is the only place that distinction
+        # survives outside the app itself.
+        lines.append("Zusatzmodul (Passerelle)")
 
     return "\n".join(lines)
 
@@ -233,6 +240,11 @@ def prepare_timetable_for_export(schedule_data: Iterable) -> pd.DataFrame:
                     "Typ": item.modultyp,
                     "Dozent:in": item.dozierende,
                     "Raum": item.raum,
+                    # See docs/planung/KONZEPT-passerelle-zusatzmodule.md
+                    # section 4.5 - hardcoded German like every other column
+                    # here, since this file has no i18n dependency at all
+                    # (unlike app.py's in-UI tables via t()/c()).
+                    "Quelle": "Zusatzmodul" if getattr(item, "ist_zusatzmodul", False) else "Hauptliste",
                 }
             )
         elif isinstance(item, dict):
@@ -255,6 +267,7 @@ def prepare_timetable_for_export(schedule_data: Iterable) -> pd.DataFrame:
         "Typ",
         "Dozent:in",
         "Raum",
+        "Quelle",
     ]
     ordered = [col for col in preferred_order if col in df.columns]
     remaining = [col for col in df.columns if col not in ordered]

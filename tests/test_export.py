@@ -18,6 +18,7 @@ from export import (
     _zurich_to_utc,
     _uid_base,
     _event_summary,
+    _event_description,
     generate_excel_download,
     generate_ics_download,
     prepare_timetable_for_export,
@@ -164,6 +165,28 @@ def test_prepare_timetable_for_export_from_modules():
     assert list(df["Modul"]) == ["Kurs A"]
     assert list(df["Datum"]) == ["2026-09-16"]
     assert list(df["Modul-Nr"]) == ["X1"]
+
+
+# --- Zusatzmodule / Passerelle export tagging --------------------------------
+# See docs/planung/KONZEPT-passerelle-zusatzmodule.md section 4.5.
+
+def test_prepare_timetable_for_export_quelle_column_marks_zusatzmodul():
+    main = make_module(modulname="MSc-Modul", ist_zusatzmodul=False)
+    zusatz = make_module(modulname="BSc-Zusatzmodul", ist_zusatzmodul=True)
+    df = prepare_timetable_for_export([main, zusatz])
+    assert list(df["Quelle"]) == ["Hauptliste", "Zusatzmodul"]
+
+
+def test_event_description_flags_zusatzmodul():
+    m = make_module(modulname="Kurs", datum=date(2026, 9, 16), ist_zusatzmodul=True)
+    description = _event_description(m, has_date=True)
+    assert "Zusatzmodul (Passerelle)" in description
+
+
+def test_event_description_omits_zusatzmodul_marker_for_main_list_rows():
+    m = make_module(modulname="Kurs", datum=date(2026, 9, 16), ist_zusatzmodul=False)
+    description = _event_description(m, has_date=True)
+    assert "Zusatzmodul" not in description
 
 
 def test_prepare_timetable_for_export_from_plain_dicts():

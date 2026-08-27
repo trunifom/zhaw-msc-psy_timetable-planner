@@ -2854,6 +2854,24 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             key="filter_lecturers",
         )
 
+        # Only shown when a Zusatzmodule upload actually contributed rows
+        # to all_modules (see docs/planung/KONZEPT-passerelle-
+        # zusatzmodule.md section 4.3) - progressive disclosure, so the
+        # large majority of students without a Passerelle background never
+        # see this filter at all.
+        zusatz_filter_mode = t("guided.filter.zusatzmodule_all")
+        if any(getattr(m, "ist_zusatzmodul", False) for m in all_modules):
+            zusatz_filter_mode = st.radio(
+                t("guided.filter.zusatzmodule"),
+                options=[
+                    t("guided.filter.zusatzmodule_all"),
+                    t("guided.filter.zusatzmodule_only"),
+                    t("guided.filter.zusatzmodule_hide"),
+                ],
+                key="filter_zusatzmodule_mode",
+                horizontal=True,
+            )
+
         sort_mode = st.selectbox(
             t("guided.sort"),
             options=[t("guided.sort.date"), t("guided.sort.weekday"), t("guided.sort.name")],
@@ -2881,6 +2899,12 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             continue
 
         if selected_lecturers and str(module.dozierende) not in selected_lecturers:
+            continue
+
+        is_zusatzmodul = getattr(module, "ist_zusatzmodul", False)
+        if zusatz_filter_mode == t("guided.filter.zusatzmodule_only") and not is_zusatzmodul:
+            continue
+        if zusatz_filter_mode == t("guided.filter.zusatzmodule_hide") and is_zusatzmodul:
             continue
 
         if base_search_text:
@@ -3530,11 +3554,26 @@ def render_dashboard(modules: List) -> None:
             st.metric(t("dashboard.metric.lessons"), lessons_per_week)
             st.caption(t("dashboard.metric.lessons_caption", hours=hours_per_week, weeks=observed_weeks))
 
-        col7, col8 = st.columns(2)
+        # Only shown when a Zusatzmodule upload actually exists (see
+        # docs/planung/KONZEPT-passerelle-zusatzmodule.md section 4.4) -
+        # checked against the full combined dataset (processed_modules_
+        # zusatz), not `modules` (the current selection), since the tile
+        # should still show "0" for a Passerelle student who uploaded a
+        # Zusatzmodule list but hasn't selected any of it yet - not
+        # disappear entirely, which would look like the upload didn't work.
+        zusatz_uploaded = bool(st.session_state.get("processed_modules_zusatz"))
+        if zusatz_uploaded:
+            col7, col8, col9 = st.columns(3)
+        else:
+            col7, col8 = st.columns(2)
         with col7:
             st.metric(t("dashboard.metric.absence_rules"), len(absence_rules))
         with col8:
             st.metric(t("dashboard.metric.absence_rows"), len(absence_selected_df))
+        if zusatz_uploaded:
+            with col9:
+                zusatz_selected_count = sum(1 for m in modules if getattr(m, "ist_zusatzmodul", False))
+                st.metric(t("dashboard.metric.zusatzmodule"), zusatz_selected_count)
 
     # Condensed on purpose: this card used to also reproduce the full
     # per-course risk table and the "all offered courses" absence-conflict

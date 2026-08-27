@@ -113,6 +113,9 @@ Für Studierende, die laut individuellem Studienplan zusätzliche Module aus ein
 - Fehlt in der hochgeladenen Zusatzliste eine Wochentag-Spalte (nur Datum vorhanden, wie bei manchen Bachelor-Exporten), wird der Wochentag automatisch aus dem Datum abgeleitet.
 - Bietet eine Zeitperiode mehrere parallele Angebote mit unterschiedlichen Dozierenden, ohne dass die Zuteilung (z. B. Halbklasse) im Export schon erkennbar ist, werden alle Angebote vorerst übernommen und mit einem Hinweis in Schritt 4 der geführten Planung sichtbar markiert, statt die Mehrdeutigkeit stillschweigend zu verstecken.
 - Wird nur die Zusatzliste wieder entfernt, bleibt die Hauptplanung unverändert bestehen; wird die Hauptdatei entfernt, wird die gesamte Planung (inkl. Zusatzmodule) zurückgesetzt.
+- In Schritt 2 der geführten Planung erscheint (nur wenn eine Zusatzliste hochgeladen wurde) ein zusätzlicher Filter "Alle anzeigen"/"Nur Zusatzmodule"/"Zusatzmodule ausblenden".
+- Das Dashboard zeigt (ebenfalls nur bei vorhandener Zusatzliste) eine zusätzliche Kennzahl "Zusatzmodule ausgewählt".
+- Export: die ICS-Beschreibung bekommt eine Zeile "Zusatzmodul (Passerelle)"; die Excel-Datei eine Spalte "Quelle" ("Hauptliste"/"Zusatzmodul").
 
 Details und der volle Umsetzungsplan: [docs/planung/KONZEPT-passerelle-zusatzmodule.md](docs/planung/KONZEPT-passerelle-zusatzmodule.md).
 
@@ -174,7 +177,7 @@ pytest:
 pytest -q
 ```
 
-153 Tests über 5 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen, Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten), zweier Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden) und der Zusatzmodul-/Passerellen-Tests (Wochentag-Ableitung aus Datum, `ist_zusatzmodul`-Kennzeichnung, Konflikterkennung über Haupt- und Zusatzliste hinweg). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
+156 Tests über 5 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen, Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten), zweier Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden) und der Zusatzmodul-/Passerellen-Tests (Wochentag-Ableitung aus Datum, `ist_zusatzmodul`-Kennzeichnung, Konflikterkennung über Haupt- und Zusatzliste hinweg). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
 
 ## Testdaten
 
