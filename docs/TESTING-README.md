@@ -175,7 +175,15 @@ check the UI itself. This includes the Zusatzmodule upload/merge feature
 (second sidebar upload, source badges in the four result tables, and the
 "undistinguished parallel offerings" hint) - verified manually via
 Playwright against the real Bachelor/Master catalogs and the fixture
-files, not by an automated test.
+files, not by an automated test. Also included: the floating feedback tab
+(`_render_feedback_widget()` in `src/app.py`, see the README's "Feedback
+geben" section) - pure HTML/CSS with no Streamlit widget behind it, so
+there's nothing for `pytest`/Streamlit's own test tooling to exercise;
+its hover/click/open behavior and light/dark rendering were checked with
+Playwright screenshots instead. What automated coverage it *does* have:
+the `test_i18n.py` exhaustive-coverage test (see the table above) fails
+if a `feedback.*` key is ever added to only one of the three language
+blocks.
 
 This gap is real, not theoretical: a design-system pass on `src/app.py`
 (card-based layout, `st.column_config` table formatting, status-color

@@ -31,7 +31,7 @@ translated for free, with no separate `hovertemplate` needed. See
 ## Key Naming Rules
 - Keep keys stable and lowercase.
 - Use namespaces:
-  - `app.*`, `sidebar.*`, `guided.*`, `dashboard.*`, `conflicts.*`, `raw.*`, `export.*`, `chart.*`
+  - `app.*`, `sidebar.*`, `guided.*`, `dashboard.*`, `conflicts.*`, `raw.*`, `export.*`, `chart.*`, `feedback.*`
   - `col.*` for DataFrame column names
 - Do not reuse one key for different meanings.
 - Prefer short, explicit keys over ambiguous ones.

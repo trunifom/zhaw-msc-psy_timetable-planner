@@ -53,6 +53,7 @@ Besonders unterstützt werden:
 		- Termine ohne erkennbares Datum werden als ganztägiger, nicht-blockierender Platzhalter markiert statt stillschweigend zu fehlen
 		- stabile UIDs: erneuter Export derselben Auswahl aktualisiert bestehende Kalendereinträge statt Duplikate zu erzeugen
 - Mehrsprachigkeit (de/en/fr) über zentrale i18n-Keys
+- Feedback-Tab: dezenter, immer sichtbarer Tab am rechten Bildschirmrand für Lob, Kritik, Verbesserungsvorschläge oder Bug-Reports (E-Mail-Link + QR-Code, kein Formular/Mailserver nötig) - Details siehe Abschnitt "Feedback geben"
 
 ## Architektur
 
@@ -119,6 +120,23 @@ Für Studierende, die laut individuellem Studienplan zusätzliche Module aus ein
 
 Details und der volle Umsetzungsplan: [docs/planung/KONZEPT-passerelle-zusatzmodule.md](docs/planung/KONZEPT-passerelle-zusatzmodule.md).
 
+## Feedback geben
+
+Am rechten Bildschirmrand, vertikal mittig, klebt ein kleiner 🐞-Tab, der in Ruhe grösstenteils hinter der Bildschirmkante versteckt bleibt (bewusst dezent, um vom Inhalt nicht abzulenken) und bei Mausüberfahrt vollständig ins Bild gleitet; ein Klick öffnet ein Panel, das auch ohne erneutes Hovern offen bleibt (praktisch für Touch-Geräte ohne Hover-Zustand). Das Panel lädt ausdrücklich zu **jeder Art von Rückmeldung** ein - Lob, Kritik, ein Verbesserungsvorschlag oder ein gefundener Bug - nicht nur zu Bug-Reports.
+
+Enthalten sind:
+
+- ein `mailto:`-Link/-Button, der das lokale E-Mail-Programm mit vorausgefülltem Betreff öffnet
+- ein QR-Code, der denselben `mailto:`-Link kodiert, zum Scannen mit dem Handy
+
+**Warum kein Formular:** Streamlit Community Cloud stellt keinen Mailserver bereit, ein selbst konfigurierter SMTP-Versand (Zugangsdaten als Secrets etc.) wäre für diesen Zweck deutlich überdimensioniert. Ein `mailto:`-Link braucht dagegen keinen Server - das "Formular" ist einfach das E-Mail-Programm der nutzenden Person.
+
+**Empfänger-Adresse ändern:** steht als einzelne Konstante `FEEDBACK_EMAIL` ganz am Anfang von [src/app.py](src/app.py) (eigener "APP SETTINGS"-Abschnitt, direkt nach den Imports) - in Sekunden anpassbar, ohne die restliche Widget-Logik zu verstehen.
+
+**QR-Code-Erzeugung:** Das QR-Bild wird vom Browser direkt bei einer öffentlichen QR-Bild-API (`api.qrserver.com`) geladen, statt serverseitig mit einer Python-Bibliothek erzeugt zu werden - eine bewusste Entscheidung, um keine neue Abhängigkeit (`qrcode`/`Pillow`) in `requirements.txt`/`environment.yaml` einzuführen (siehe Abschnitt "Troubleshooting" zu früheren Deployment-Problemen mit Abhängigkeiten). Übertragen wird dabei nur die feste Feedback-Mailadresse, keine Nutzerdaten.
+
+Technisch ist der Tab reines HTML/CSS (`<details>`/`<summary>`, siehe `_render_feedback_widget()` und die `.zp-feedback*`-Regeln in `_inject_design_system_css()` in `src/app.py`) - kein Streamlit-Widget und kein `session_state` dahinter, damit das Öffnen keinen Skript-Rerun auslöst.
+
 ## Dateninput und Annahmen
 
 Die Importlogik ist tolerant gegenüber Header-Varianten und Metadatenzeilen. Zentral sind u. a.:
@@ -177,7 +195,7 @@ pytest:
 pytest -q
 ```
 
-188 Tests über 6 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`, `tests/test_zusatzmodule_fixtures.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen, Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten), zweier Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden) und der umfangreichen Zusatzmodul-/Passerellen-Tests gegen realistisch grosse, aus den echten HS26-Katalogen fiktionalisierte Testdaten (Wochentag-Ableitung, `ist_zusatzmodul`-Kennzeichnung, Konflikterkennung über Haupt- und Zusatzliste hinweg, Modul-Nr.-Kollisionsszenario, Export bei realistischem Umfang). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
+195 Tests über 7 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`, `tests/test_zusatzmodule_fixtures.py`, `tests/test_deployment_config.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen (deckt auch die `feedback.*`-Keys des Feedback-Tabs ab), Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten), mehrerer Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden, `requirements.txt`-numpy-Pin) und der umfangreichen Zusatzmodul-/Passerellen-Tests gegen realistisch grosse, aus den echten HS26-Katalogen fiktionalisierte Testdaten (Wochentag-Ableitung, `ist_zusatzmodul`-Kennzeichnung, Konflikterkennung über Haupt- und Zusatzliste hinweg, Modul-Nr.-Kollisionsszenario, Export bei realistischem Umfang). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
 
 ## Testdaten
 
@@ -248,9 +266,11 @@ zhaw-msc-psy_timetable-planner/
 - Warum kein `matplotlib` als Abhängigkeit: die farbig hinterlegten Überlappungs-/Risikowerte in den Tabellen sehen aus wie pandas' `Styler.background_gradient()`, sind aber bewusst selbst gebaut (`_style_sequential_red` in `src/app.py`) – `background_gradient()` bricht sonst beim ersten Zugriff mit `ImportError: background_gradient requires matplotlib.` ab, da `matplotlib` nirgends in `requirements.txt`/`environment.yaml` steht. Beim Ergänzen neuer farbcodierter Tabellen bitte diese Funktion wiederverwenden statt `background_gradient()` neu einzuführen
 - `.streamlit/config.toml` (setzt `primaryColor` auf ZHAW Blau, damit native Streamlit-Steuerelemente wie Radio-Buttons/Checkboxen/Toggles/Buttons nicht mehr Streamlits Standard-Rot verwenden) wird nur erkannt, wenn es relativ zum **Arbeitsverzeichnis der Shell** beim Start liegt – also im Repo-Root, wenn wie dokumentiert per `streamlit run src/app.py` **aus dem Repo-Root** gestartet wird. Ein Start via `cd src && streamlit run app.py` (Arbeitsverzeichnis wäre dann `src/`) findet die Datei nicht und die Steuerelemente fallen zurück auf Streamlits Standardfarbe – falls Buttons/Radios plötzlich wieder rot statt ZHAW-blau erscheinen, zuerst das Arbeitsverzeichnis beim Start prüfen, nicht den Farbwert
 - Farben/Kontraste stimmen für ein bestimmtes UI-Element (Button, Tabelle, Dropdown, Chart-Text) nach einem Theme-Wechsel nicht: `_inject_design_system_css()` in `src/app.py` deckt Streamlits native Widgets nur ab, wenn sie dort explizit per CSS-Selektor angesprochen werden (`.stButton`, `.stTextInput input`, `[data-baseweb="select"]` usw.) – ein neuer, noch nicht dort erfasster Widget-Typ fällt sonst auf Streamlits eigenes, vom App-Theme-Toggle unabhängiges natives Erscheinungsbild zurück. Bei einem neuen Widget-Typ in der UI immer in beiden Themes im Browser gegenprüfen, nicht nur im Code lesen (siehe auch "What isn't covered" in [docs/TESTING-README.md](docs/TESTING-README.md))
+- QR-Code im Feedback-Tab (rechter Bildschirmrand, siehe Abschnitt "Feedback geben") lädt nicht oder bleibt leer: das Bild kommt von einer externen API (`api.qrserver.com`) und wird vom **Browser** geladen, nicht vom Streamlit-Server - es braucht also Internetzugriff im Browser der nutzenden Person (den die App als Web-App ohnehin voraussetzt), nicht auf dem Server selbst. Der `mailto:`-Button daneben funktioniert davon unabhängig immer, auch ohne dass das QR-Bild lädt
 
 ## Datenschutz
 
 - Verarbeitung erfolgt in der laufenden Session (in-memory)
 - keine persistente Datenbank notwendig
 - hochgeladene persönliche Planungsdaten sollten nicht ins Repository eingecheckt werden
+- der Feedback-Tab (siehe "Feedback geben") lädt das QR-Code-Bild von einer externen API (`api.qrserver.com`); übertragen wird dabei ausschliesslich die feste, öffentliche Feedback-Mailadresse (`FEEDBACK_EMAIL` in `src/app.py`) - keine Nutzer- oder Planungsdaten
