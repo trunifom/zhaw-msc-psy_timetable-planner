@@ -34,6 +34,7 @@ import logging
 from typing import List, Tuple, Any
 from datetime import date, timedelta
 from contextlib import contextmanager
+from urllib.parse import quote
 import re
 import plotly.express as px
 from i18n import get_text
@@ -458,6 +459,86 @@ def _inject_design_system_css() -> None:
         .zp-badge-warning {{ background: var(--zp-warning-bg); color: var(--zp-warning); }}
         .zp-badge-danger  {{ background: var(--zp-danger-bg);  color: var(--zp-danger); }}
         .zp-badge-info    {{ background: var(--zp-info-bg);    color: var(--zp-info); }}
+
+        /* --- Bug-report tab (see _render_bug_report_widget) -----------
+           A small tab pinned to the right edge, vertically centered, that
+           mostly peeks out from behind the viewport edge at rest (low-key,
+           doesn't compete with the actual content) and slides fully into
+           view on hover; clicking it (native <details>/<summary>, no JS)
+           keeps the panel open, which also covers touch devices that have
+           no hover state. Visibility of the panel itself is driven by our
+           own :hover/[open] rules below rather than relying purely on the
+           browser's default "hide non-summary content unless [open]"
+           behavior, precisely so hover alone can reveal it too. */
+        .zp-bugreport {{
+            position: fixed;
+            top: 50%;
+            right: 0;
+            transform: translateY(-50%);
+            z-index: 9999;
+        }}
+        .zp-bugreport summary {{
+            list-style: none;
+            cursor: pointer;
+            background: var(--zp-surface);
+            border: 1px solid var(--zp-border);
+            border-right: none;
+            border-radius: 10px 0 0 10px;
+            box-shadow: var(--zp-shadow);
+            padding: 0.55rem 0.5rem;
+            font-size: 1.15rem;
+            line-height: 1;
+            opacity: 0.55;
+            transform: translateX(16px);
+            transition: transform 0.2s ease, opacity 0.2s ease;
+        }}
+        .zp-bugreport summary::-webkit-details-marker {{ display: none; }}
+        .zp-bugreport:hover summary, .zp-bugreport[open] summary {{
+            opacity: 1;
+            transform: translateX(0);
+        }}
+        .zp-bugreport-panel {{
+            display: none;
+            position: absolute;
+            top: 50%;
+            right: 100%;
+            transform: translateY(-50%);
+            margin-right: 0.5rem;
+            width: 260px;
+            max-width: 78vw;
+            background: var(--zp-surface);
+            border: 1px solid var(--zp-border);
+            border-radius: 14px;
+            box-shadow: var(--zp-shadow);
+            padding: 1rem;
+        }}
+        .zp-bugreport:hover .zp-bugreport-panel, .zp-bugreport[open] .zp-bugreport-panel {{
+            display: block;
+        }}
+        .zp-bugreport-title {{ font-weight: 700; color: var(--zp-text); margin-bottom: 0.4rem; }}
+        .zp-bugreport-text {{ font-size: 0.83rem; color: var(--zp-text-muted); margin-bottom: 0.6rem; }}
+        .zp-bugreport-panel img {{ display: block; margin: 0 auto 0.6rem auto; border-radius: 8px; }}
+        .zp-bugreport-email {{
+            font-family: monospace;
+            font-size: 0.83rem;
+            color: var(--zp-text);
+            background: var(--zp-surface-hover);
+            padding: 0.2rem 0.45rem;
+            border-radius: 6px;
+            word-break: break-all;
+        }}
+        .zp-bugreport-btn {{
+            display: block;
+            text-align: center;
+            margin-top: 0.7rem;
+            background: var(--zp-accent);
+            color: var(--zp-accent-text) !important;
+            padding: 0.5rem;
+            border-radius: 8px;
+            text-decoration: none !important;
+            font-weight: 600;
+        }}
+        .zp-bugreport-btn:hover {{ opacity: 0.9; }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -640,6 +721,49 @@ def card(key: str, icon: str = "", title: str = "", subtitle: str = ""):
                 unsafe_allow_html=True,
             )
         yield
+
+
+def _render_bug_report_widget() -> None:
+    """
+    Low-key "report a bug / give feedback" tab pinned to the right edge of
+    the viewport, visible on every tab since it's rendered once in main()
+    outside the st.tabs() blocks. Pure HTML/CSS (<details>/<summary>, styled
+    in _inject_design_system_css()) - no Streamlit widget or session_state
+    behind it, so opening it does not trigger a script rerun.
+
+    No mail server is available on Streamlit Community Cloud, so this
+    doesn't try to submit a form anywhere: it's a mailto: link (opens the
+    user's own email client) plus a QR code encoding that same link for
+    scanning with a phone. The QR image is fetched by the browser directly
+    from a public QR-code API (api.qrserver.com) rather than generated
+    server-side, which was a deliberate choice (2026-09-01) to avoid adding
+    a new Python dependency (qrcode/Pillow) to requirements.txt/
+    environment.yaml - see [[project-conventions]]-style deployment
+    caution after past numpy-pin/conda-env issues in this repo. The mailto
+    link only ever encodes the public trug@zhaw.ch address plus a
+    translated subject/body - no user data is sent to that API.
+    """
+    email = "trug@zhaw.ch"
+    mailto = f"mailto:{email}?subject={quote(t('bugreport.mail_subject'))}&body={quote(t('bugreport.mail_body'))}"
+    qr_src = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={quote(mailto, safe='')}"
+
+    st.markdown(
+        f"""
+        <details class="zp-bugreport">
+            <summary title="{t('bugreport.tab_label')}">🐞</summary>
+            <div class="zp-bugreport-panel">
+                <div class="zp-bugreport-title">{t('bugreport.title')}</div>
+                <div class="zp-bugreport-text">{t('bugreport.instructions')}</div>
+                <img src="{qr_src}" alt="{t('bugreport.qr_alt')}" width="150" height="150" loading="lazy" />
+                <div class="zp-bugreport-text">{t('bugreport.email_label')}<br>
+                    <span class="zp-bugreport-email">{email}</span>
+                </div>
+                <a class="zp-bugreport-btn" href="{mailto}">{t('bugreport.button_label')}</a>
+            </div>
+        </details>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def badge(text: str, kind: str = "info") -> str:
@@ -4109,6 +4233,11 @@ def main() -> None:
     # Ensure backend modules are loaded before rendering the app
     if not MODULES_AVAILABLE:
         st.stop()
+
+    # Fixed, always-visible bug-report tab (see docstring) - rendered once
+    # here rather than per-tab so it stays on screen regardless of which of
+    # the five st.tabs() below is active.
+    _render_bug_report_widget()
 
     # Render Sidebar
     render_sidebar()

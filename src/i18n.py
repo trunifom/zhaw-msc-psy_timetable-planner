@@ -45,6 +45,15 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "app.quickstart_title": "Schnellstart in 3 Schritten",
         "app.quickstart_text": "① Datei hochladen  ②  In der geführten Planung filtern und auswählen  ③  Konflikte prüfen und am Ende exportieren.",
 
+        "bugreport.tab_label": "Feedback / Bug melden",
+        "bugreport.title": "🐛 Bug melden oder Feedback geben",
+        "bugreport.instructions": "Etwas funktioniert nicht wie erwartet? Kurz melden per E-Mail oder QR-Code mit dem Handy scannen:",
+        "bugreport.email_label": "E-Mail:",
+        "bugreport.button_label": "✉️ E-Mail öffnen",
+        "bugreport.qr_alt": "QR-Code für E-Mail an trug@zhaw.ch",
+        "bugreport.mail_subject": "ZHAW Studienplaner – Feedback/Bug",
+        "bugreport.mail_body": "Kurz beschreiben, was passiert ist (gerne auch: welcher Tab, welche Datei):\n\n",
+
         "sidebar.header": "⚙️ Steuerung",
         "sidebar.description": "Lade hier deinen Stundenplan hoch und passe die Ansicht an.",
         "sidebar.section.language": "Sprache",
@@ -376,6 +385,15 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "app.quickstart_title": "Quick start in 3 steps",
         "app.quickstart_text": "① Upload file  ②  Filter/select in guided planning  ③  Review conflicts and export at the end.",
 
+        "bugreport.tab_label": "Feedback / report a bug",
+        "bugreport.title": "🐛 Report a bug or give feedback",
+        "bugreport.instructions": "Something not working as expected? Send a quick email, or scan the QR code with your phone:",
+        "bugreport.email_label": "Email:",
+        "bugreport.button_label": "✉️ Open email",
+        "bugreport.qr_alt": "QR code for an email to trug@zhaw.ch",
+        "bugreport.mail_subject": "ZHAW Timetable Planner – Feedback/Bug",
+        "bugreport.mail_body": "Briefly describe what happened (which tab, which file, if relevant):\n\n",
+
         "sidebar.header": "⚙️ Controls",
         "sidebar.description": "Upload your timetable and adjust the display.",
         "sidebar.section.language": "Language",
@@ -706,6 +724,15 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "app.info.no_selection_conflicts": "Aucun cours sélectionné pour l'analyse des conflits.",
         "app.quickstart_title": "Démarrage rapide en 3 étapes",
         "app.quickstart_text": "① Importer le fichier  ②  Filtrer/sélectionner dans la planification guidée  ③  Vérifier les conflits puis exporter.",
+
+        "bugreport.tab_label": "Feedback / signaler un bug",
+        "bugreport.title": "🐛 Signaler un bug ou donner un feedback",
+        "bugreport.instructions": "Quelque chose ne fonctionne pas comme prévu ? Envoie un e-mail ou scanne le QR code avec ton téléphone :",
+        "bugreport.email_label": "E-mail :",
+        "bugreport.button_label": "✉️ Ouvrir l'e-mail",
+        "bugreport.qr_alt": "QR code pour un e-mail à trug@zhaw.ch",
+        "bugreport.mail_subject": "Planificateur d'études ZHAW – Feedback/Bug",
+        "bugreport.mail_body": "Décris brièvement ce qui s'est passé (quel onglet, quel fichier, si pertinent) :\n\n",
 
         "sidebar.header": "⚙️ Commandes",
         "sidebar.description": "Importe ton horaire et ajuste l'affichage.",
