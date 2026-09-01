@@ -40,6 +40,19 @@ import plotly.express as px
 from i18n import get_text
 
 # ==========================================
+# APP SETTINGS
+# ==========================================
+# Recipient for the floating feedback widget (see _render_feedback_widget()
+# further down) - the only address feedback/bug reports get sent to (via a
+# mailto: link, no mail server involved). Kept as a single top-of-file
+# constant, deliberately separate from the (much larger) THEME_TOKENS/
+# CHART_PALETTES settings-style blocks below, so it can be found and
+# changed in seconds without needing to understand the widget's rendering
+# code - e.g. when a different person should receive feedback next
+# semester.
+FEEDBACK_EMAIL = "trug@zhaw.ch"
+
+# ==========================================
 # 0. LOGGING
 # ==========================================
 # Same self-contained per-module pattern as data_loader.py (a module-owned
@@ -460,7 +473,7 @@ def _inject_design_system_css() -> None:
         .zp-badge-danger  {{ background: var(--zp-danger-bg);  color: var(--zp-danger); }}
         .zp-badge-info    {{ background: var(--zp-info-bg);    color: var(--zp-info); }}
 
-        /* --- Bug-report tab (see _render_bug_report_widget) -----------
+        /* --- Feedback tab (see _render_feedback_widget) -----------
            A small tab pinned to the right edge, vertically centered, that
            mostly peeks out from behind the viewport edge at rest (low-key,
            doesn't compete with the actual content) and slides fully into
@@ -470,14 +483,14 @@ def _inject_design_system_css() -> None:
            own :hover/[open] rules below rather than relying purely on the
            browser's default "hide non-summary content unless [open]"
            behavior, precisely so hover alone can reveal it too. */
-        .zp-bugreport {{
+        .zp-feedback {{
             position: fixed;
             top: 50%;
             right: 0;
             transform: translateY(-50%);
             z-index: 9999;
         }}
-        .zp-bugreport summary {{
+        .zp-feedback summary {{
             list-style: none;
             cursor: pointer;
             background: var(--zp-surface);
@@ -492,12 +505,12 @@ def _inject_design_system_css() -> None:
             transform: translateX(16px);
             transition: transform 0.2s ease, opacity 0.2s ease;
         }}
-        .zp-bugreport summary::-webkit-details-marker {{ display: none; }}
-        .zp-bugreport:hover summary, .zp-bugreport[open] summary {{
+        .zp-feedback summary::-webkit-details-marker {{ display: none; }}
+        .zp-feedback:hover summary, .zp-feedback[open] summary {{
             opacity: 1;
             transform: translateX(0);
         }}
-        .zp-bugreport-panel {{
+        .zp-feedback-panel {{
             display: none;
             position: absolute;
             top: 50%;
@@ -512,13 +525,13 @@ def _inject_design_system_css() -> None:
             box-shadow: var(--zp-shadow);
             padding: 1rem;
         }}
-        .zp-bugreport:hover .zp-bugreport-panel, .zp-bugreport[open] .zp-bugreport-panel {{
+        .zp-feedback:hover .zp-feedback-panel, .zp-feedback[open] .zp-feedback-panel {{
             display: block;
         }}
-        .zp-bugreport-title {{ font-weight: 700; color: var(--zp-text); margin-bottom: 0.4rem; }}
-        .zp-bugreport-text {{ font-size: 0.83rem; color: var(--zp-text-muted); margin-bottom: 0.6rem; }}
-        .zp-bugreport-panel img {{ display: block; margin: 0 auto 0.6rem auto; border-radius: 8px; }}
-        .zp-bugreport-email {{
+        .zp-feedback-title {{ font-weight: 700; color: var(--zp-text); margin-bottom: 0.4rem; }}
+        .zp-feedback-text {{ font-size: 0.83rem; color: var(--zp-text-muted); margin-bottom: 0.6rem; }}
+        .zp-feedback-panel img {{ display: block; margin: 0 auto 0.6rem auto; border-radius: 8px; }}
+        .zp-feedback-email {{
             font-family: monospace;
             font-size: 0.83rem;
             color: var(--zp-text);
@@ -527,7 +540,7 @@ def _inject_design_system_css() -> None:
             border-radius: 6px;
             word-break: break-all;
         }}
-        .zp-bugreport-btn {{
+        .zp-feedback-btn {{
             display: block;
             text-align: center;
             margin-top: 0.7rem;
@@ -538,7 +551,7 @@ def _inject_design_system_css() -> None:
             text-decoration: none !important;
             font-weight: 600;
         }}
-        .zp-bugreport-btn:hover {{ opacity: 0.9; }}
+        .zp-feedback-btn:hover {{ opacity: 0.9; }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -723,13 +736,15 @@ def card(key: str, icon: str = "", title: str = "", subtitle: str = ""):
         yield
 
 
-def _render_bug_report_widget() -> None:
+def _render_feedback_widget() -> None:
     """
-    Low-key "report a bug / give feedback" tab pinned to the right edge of
-    the viewport, visible on every tab since it's rendered once in main()
-    outside the st.tabs() blocks. Pure HTML/CSS (<details>/<summary>, styled
-    in _inject_design_system_css()) - no Streamlit widget or session_state
-    behind it, so opening it does not trigger a script rerun.
+    Low-key "give feedback" tab pinned to the right edge of the viewport,
+    visible on every tab since it's rendered once in main() outside the
+    st.tabs() blocks. Pure HTML/CSS (<details>/<summary>, styled in
+    _inject_design_system_css()) - no Streamlit widget or session_state
+    behind it, so opening it does not trigger a script rerun. Deliberately
+    invites more than bug reports (praise, criticism, improvement ideas),
+    not just defects - see the "feedback.*" i18n keys' wording.
 
     No mail server is available on Streamlit Community Cloud, so this
     doesn't try to submit a form anywhere: it's a mailto: link (opens the
@@ -740,25 +755,27 @@ def _render_bug_report_widget() -> None:
     a new Python dependency (qrcode/Pillow) to requirements.txt/
     environment.yaml - see [[project-conventions]]-style deployment
     caution after past numpy-pin/conda-env issues in this repo. The mailto
-    link only ever encodes the public trug@zhaw.ch address plus a
-    translated subject/body - no user data is sent to that API.
+    link only ever encodes the FEEDBACK_EMAIL address plus a translated
+    subject/body - no user data is sent to that API.
+
+    Recipient address: FEEDBACK_EMAIL (top of this file), not hardcoded
+    here, so it can be changed in one place without touching this function.
     """
-    email = "trug@zhaw.ch"
-    mailto = f"mailto:{email}?subject={quote(t('bugreport.mail_subject'))}&body={quote(t('bugreport.mail_body'))}"
+    mailto = f"mailto:{FEEDBACK_EMAIL}?subject={quote(t('feedback.mail_subject'))}&body={quote(t('feedback.mail_body'))}"
     qr_src = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={quote(mailto, safe='')}"
 
     st.markdown(
         f"""
-        <details class="zp-bugreport">
-            <summary title="{t('bugreport.tab_label')}">🐞</summary>
-            <div class="zp-bugreport-panel">
-                <div class="zp-bugreport-title">{t('bugreport.title')}</div>
-                <div class="zp-bugreport-text">{t('bugreport.instructions')}</div>
-                <img src="{qr_src}" alt="{t('bugreport.qr_alt')}" width="150" height="150" loading="lazy" />
-                <div class="zp-bugreport-text">{t('bugreport.email_label')}<br>
-                    <span class="zp-bugreport-email">{email}</span>
+        <details class="zp-feedback">
+            <summary title="{t('feedback.tab_label')}">🐞</summary>
+            <div class="zp-feedback-panel">
+                <div class="zp-feedback-title">{t('feedback.title')}</div>
+                <div class="zp-feedback-text">{t('feedback.instructions')}</div>
+                <img src="{qr_src}" alt="{t('feedback.qr_alt', email=FEEDBACK_EMAIL)}" width="150" height="150" loading="lazy" />
+                <div class="zp-feedback-text">{t('feedback.email_label')}<br>
+                    <span class="zp-feedback-email">{FEEDBACK_EMAIL}</span>
                 </div>
-                <a class="zp-bugreport-btn" href="{mailto}">{t('bugreport.button_label')}</a>
+                <a class="zp-feedback-btn" href="{mailto}">{t('feedback.button_label')}</a>
             </div>
         </details>
         """,
@@ -4234,10 +4251,10 @@ def main() -> None:
     if not MODULES_AVAILABLE:
         st.stop()
 
-    # Fixed, always-visible bug-report tab (see docstring) - rendered once
+    # Fixed, always-visible feedback tab (see docstring) - rendered once
     # here rather than per-tab so it stays on screen regardless of which of
     # the five st.tabs() below is active.
-    _render_bug_report_widget()
+    _render_feedback_widget()
 
     # Render Sidebar
     render_sidebar()
