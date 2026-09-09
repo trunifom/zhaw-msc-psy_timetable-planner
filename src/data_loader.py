@@ -15,6 +15,10 @@ Pipeline overview (see `load_schedule_from_dataframe` for the entry point):
                                       one canonical internal schema
         -> _sanitize_dataframe       coerce types, parse dates/times/%,
                                       drop obviously-junk rows
+        -> _filter_zusatzmodule_by_allowlist   optional Modul-Nr/Kurs-Nr
+                                      allowlist filter, Zusatzmodule-only -
+                                      currently disabled by default, see
+                                      ZUSATZMODULE_ALLOWLIST_ENABLED below
         -> ZHAWModule(**row)         final strict validation (models.py),
                                       one row at a time so a single bad
                                       row doesn't sink the whole import
@@ -29,8 +33,10 @@ warn about it" rather than "reject the whole file".
 
 import pandas as pd
 import logging
+import json
 import re
 from datetime import date, datetime
+from pathlib import Path
 from typing import List, Dict, Any
 from pydantic import ValidationError
 
@@ -159,6 +165,100 @@ COLUMN_ALIASES = {
         "presence", "presence_requirement", "mandatory_attendance"
     },
 }
+
+# ==========================================
+# 3b. ZUSATZMODULE-VORFILTER (Vorbereitung, aktuell deaktiviert)
+# ==========================================
+# ZHAW plant, den Passerelle-Studierenden künftig eine offizielle Liste
+# vorzugeben, welche Bachelor-Kurse aus der Zusatzmodul-Datei sie überhaupt
+# wählen dürfen (von den insgesamt sehr vielen Bachelor-Kursen ist nur ein
+# kleiner Teil zulässig). Diese Liste existiert heute noch nicht - dieser
+# Block bereitet die Filterlogik bereits vor, DEAKTIVIERT per Default, damit
+# in einer künftigen Session nur noch die echte Liste eingetragen und das
+# Flag umgeschaltet werden muss, statt die Funktion dann komplett neu zu
+# entwerfen. Solange ZUSATZMODULE_ALLOWLIST_ENABLED False ist, hat dieser
+# ganze Block keinerlei Effekt auf das Verhalten der App (siehe Tests in
+# tests/test_zusatzmodule_allowlist.py, insbesondere
+# test_disabled_by_default_is_a_pure_noop).
+ZUSATZMODULE_ALLOWLIST_ENABLED = False
+
+# Pfad ist bewusst relativ zu dieser Datei (nicht zum CWD) berechnet, analog
+# zur .streamlit/config.toml-Regel in den Projekt-Konventionen: `src/` liegt
+# einen Ordner unterhalb des Repo-Roots, `settings/` liegt direkt darunter.
+ZUSATZMODULE_ALLOWLIST_PATH = Path(__file__).resolve().parent.parent / "settings" / "zusatzmodule_allowlist.json"
+
+
+def load_zusatzmodule_allowlist(path: Path | None = None) -> Dict[str, set] | None:
+    """
+    Load the (future) Modul-Nr/Kurs-Nr allowlist for the Zusatzmodule
+    upload from a JSON settings file, or None if it can't be used.
+
+    Returns a dict with "modul_nr" and "kurs_nr" keys, each a set of
+    normalized (stripped) string values - or None if the file is missing,
+    unreadable, or not shaped as expected. Deliberately never raises: this
+    is a forward-looking, currently-inactive feature (see
+    ZUSATZMODULE_ALLOWLIST_ENABLED above), so a broken/missing settings
+    file must degrade to "no filtering happens", matching this module's
+    general philosophy of never hard-failing an upload over one optional,
+    not-yet-required input.
+    """
+    settings_path = path or ZUSATZMODULE_ALLOWLIST_PATH
+    try:
+        with open(settings_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"Could not load Zusatzmodule allowlist from {settings_path}: {e}")
+        return None
+
+    if not isinstance(raw, dict):
+        logger.warning(f"Zusatzmodule allowlist at {settings_path} is not a JSON object. Ignoring.")
+        return None
+
+    def _as_str_set(values: Any) -> set:
+        if not isinstance(values, list):
+            return set()
+        return {str(v).strip() for v in values if str(v).strip()}
+
+    return {
+        "modul_nr": _as_str_set(raw.get("erlaubte_modul_nr")),
+        "kurs_nr": _as_str_set(raw.get("erlaubte_kurs_nr")),
+    }
+
+
+def _filter_zusatzmodule_by_allowlist(df: pd.DataFrame, allowlist: Dict[str, set]) -> tuple[pd.DataFrame, int]:
+    """
+    Keep only rows whose `modul_nr` or `kurs_nr` appears in `allowlist`
+    (either match is sufficient - a real ZHAW export may reliably populate
+    only one of the two columns). Rows missing both columns entirely are
+    kept as-is, since there's nothing to check them against - this filter
+    only removes rows it can positively confirm are NOT on the list, it
+    never removes a row out of uncertainty.
+
+    Only called for the Zusatzmodule upload (never the main schedule) and
+    only when ZUSATZMODULE_ALLOWLIST_ENABLED is True - see the call site in
+    load_schedule_from_dataframe().
+    """
+    allowed_modul_nr = allowlist.get("modul_nr") or set()
+    allowed_kurs_nr = allowlist.get("kurs_nr") or set()
+    if not allowed_modul_nr and not allowed_kurs_nr:
+        return df, 0
+
+    has_modul_nr_col = "modul_nr" in df.columns
+    has_kurs_nr_col = "kurs_nr" in df.columns
+    if not has_modul_nr_col and not has_kurs_nr_col:
+        return df, 0
+
+    def _row_is_allowed(row: pd.Series) -> bool:
+        if has_modul_nr_col and str(row.get("modul_nr", "")).strip() in allowed_modul_nr:
+            return True
+        if has_kurs_nr_col and str(row.get("kurs_nr", "")).strip() in allowed_kurs_nr:
+            return True
+        return False
+
+    keep_mask = df.apply(_row_is_allowed, axis=1)
+    filtered_df = df.loc[keep_mask].reset_index(drop=True)
+    excluded_count = len(df) - len(filtered_df)
+    return filtered_df, excluded_count
 
 
 def _normalize_label(value: Any) -> str:
@@ -589,6 +689,19 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame, ist_zusatzmodul: bool = F
     # up automatically via row.to_dict(), without needing a second call
     # site to remember to set it).
     df["ist_zusatzmodul"] = bool(ist_zusatzmodul)
+
+    # 5b. Zusatzmodule-Vorfilter (siehe ZUSATZMODULE_ALLOWLIST_ENABLED oben) -
+    # nur relevant für die Zusatzmodul-Datei, und nur solange das Feature
+    # eingeschaltet ist; ansonsten ist dieser Block ein reines No-Op.
+    if ist_zusatzmodul and ZUSATZMODULE_ALLOWLIST_ENABLED:
+        allowlist = load_zusatzmodule_allowlist()
+        if allowlist:
+            df, excluded_by_allowlist = _filter_zusatzmodule_by_allowlist(df, allowlist)
+            if excluded_by_allowlist:
+                logger.info(
+                    f"{excluded_by_allowlist} Zusatzmodule row(s) excluded: "
+                    "not on the Modul-Nr/Kurs-Nr allowlist."
+                )
 
     # 6. Object Mapping (DataFrame -> List[Pydantic Models])
     processed_modules: List[ZHAWModule] = []

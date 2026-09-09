@@ -1,0 +1,12 @@
+{
+  "_hinweis": "Platzhalter-/Testliste, KEINE echten ZHAW-Daten. Bis die ZHAW eine offizielle Liste der fuer Passerelle-Studierende waehlbaren Bachelor-Zusatzmodule veroeffentlicht, dient diese Datei nur als Struktur-Beispiel fuer src/data_loader.py: load_zusatzmodule_allowlist(). Aktuell ohne Wirkung, da ZUSATZMODULE_ALLOWLIST_ENABLED in data_loader.py auf False steht. Sobald die echte Liste vorliegt: Werte unten ersetzen und das Flag auf True setzen.",
+  "erlaubte_modul_nr": [
+    "BSC-BEISPIEL-1",
+    "BSC-BEISPIEL-2",
+    "BSC-BEISPIEL-3"
+  ],
+  "erlaubte_kurs_nr": [
+    "BSC-BEISPIEL-1.1",
+    "BSC-BEISPIEL-2.1"
+  ]
+}
