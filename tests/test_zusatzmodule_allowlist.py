@@ -68,8 +68,8 @@ def test_load_zusatzmodule_allowlist_reads_shipped_settings_file():
     # this is what a future session will build on.
     allowlist = load_zusatzmodule_allowlist()
     assert allowlist is not None
-    assert "BSC-BEISPIEL-1" in allowlist["modul_nr"]
-    assert "BSC-BEISPIEL-1.1" in allowlist["kurs_nr"]
+    assert "ZZ1" in allowlist["modul_nr"]
+    assert "ZZ1-1" in allowlist["kurs_nr"]
 
 
 def test_load_zusatzmodule_allowlist_missing_file_returns_none(tmp_path):
@@ -94,22 +94,22 @@ def test_load_zusatzmodule_allowlist_normalizes_and_deduplicates(tmp_path):
     custom.write_text(
         json.dumps(
             {
-                "erlaubte_modul_nr": [" BSC-1 ", "BSC-1", "BSC-2", 123],
-                "erlaubte_kurs_nr": ["BSC-1.1"],
+                "erlaubte_modul_nr": [" ZZ1 ", "ZZ1", "ZZ2", 123],
+                "erlaubte_kurs_nr": ["ZZ1-1"],
             }
         ),
         encoding="utf-8",
     )
     allowlist = load_zusatzmodule_allowlist(custom)
-    assert allowlist["modul_nr"] == {"BSC-1", "BSC-2", "123"}
-    assert allowlist["kurs_nr"] == {"BSC-1.1"}
+    assert allowlist["modul_nr"] == {"ZZ1", "ZZ2", "123"}
+    assert allowlist["kurs_nr"] == {"ZZ1-1"}
 
 
 def test_load_zusatzmodule_allowlist_missing_keys_yield_empty_sets(tmp_path):
     custom = tmp_path / "partial.json"
-    custom.write_text(json.dumps({"erlaubte_modul_nr": ["BSC-1"]}), encoding="utf-8")
+    custom.write_text(json.dumps({"erlaubte_modul_nr": ["ZZ1"]}), encoding="utf-8")
     allowlist = load_zusatzmodule_allowlist(custom)
-    assert allowlist["modul_nr"] == {"BSC-1"}
+    assert allowlist["modul_nr"] == {"ZZ1"}
     assert allowlist["kurs_nr"] == set()
 
 
@@ -121,30 +121,30 @@ def test_load_zusatzmodule_allowlist_missing_keys_yield_empty_sets(tmp_path):
 # run (see the pipeline overview in this module's docstring).
 
 def test_filter_keeps_only_rows_matching_modul_nr():
-    df = pd.DataFrame({"modul_nr": ["BSC-1", "BSC-2"]})
-    filtered, excluded = _filter_zusatzmodule_by_allowlist(df, {"modul_nr": {"BSC-1"}, "kurs_nr": set()})
+    df = pd.DataFrame({"modul_nr": ["ZZ1", "ZZ2"]})
+    filtered, excluded = _filter_zusatzmodule_by_allowlist(df, {"modul_nr": {"ZZ1"}, "kurs_nr": set()})
     assert len(filtered) == 1
-    assert filtered.iloc[0]["modul_nr"] == "BSC-1"
+    assert filtered.iloc[0]["modul_nr"] == "ZZ1"
     assert excluded == 1
 
 
 def test_filter_keeps_rows_matching_kurs_nr_even_without_modul_nr_match():
     df = pd.DataFrame(
         {
-            "modul_nr": ["BSC-OTHER", "BSC-OTHER"],
-            "kurs_nr": ["BSC-1.1", "BSC-9.9"],
+            "modul_nr": ["ZZ-OTHER", "ZZ-OTHER"],
+            "kurs_nr": ["ZZ1-1", "ZZ9-9"],
         }
     )
     filtered, excluded = _filter_zusatzmodule_by_allowlist(
-        df, {"modul_nr": {"BSC-1"}, "kurs_nr": {"BSC-1.1"}}
+        df, {"modul_nr": {"ZZ1"}, "kurs_nr": {"ZZ1-1"}}
     )
     assert len(filtered) == 1
-    assert filtered.iloc[0]["kurs_nr"] == "BSC-1.1"
+    assert filtered.iloc[0]["kurs_nr"] == "ZZ1-1"
     assert excluded == 1
 
 
 def test_filter_is_noop_when_allowlist_is_empty():
-    df = pd.DataFrame({"modul_nr": ["BSC-1", "BSC-2"]})
+    df = pd.DataFrame({"modul_nr": ["ZZ1", "ZZ2"]})
     filtered, excluded = _filter_zusatzmodule_by_allowlist(df, {"modul_nr": set(), "kurs_nr": set()})
     assert len(filtered) == 2
     assert excluded == 0
@@ -152,7 +152,7 @@ def test_filter_is_noop_when_allowlist_is_empty():
 
 def test_filter_is_noop_when_neither_column_present():
     df = pd.DataFrame({"wochentag": ["Montag"], "startzeit": ["08:00"]})
-    filtered, excluded = _filter_zusatzmodule_by_allowlist(df, {"modul_nr": {"BSC-1"}, "kurs_nr": set()})
+    filtered, excluded = _filter_zusatzmodule_by_allowlist(df, {"modul_nr": {"ZZ1"}, "kurs_nr": set()})
     assert len(filtered) == 1
     assert excluded == 0
 
@@ -173,7 +173,7 @@ def test_disabled_by_default_is_a_pure_noop(monkeypatch):
         "load_zusatzmodule_allowlist",
         lambda *a, **kw: {"modul_nr": set(), "kurs_nr": set()},
     )
-    df = _minimal_zusatzmodule_df([{"modul_nr": "BSC-1"}, {"modul_nr": "BSC-2"}])
+    df = _minimal_zusatzmodule_df([{"modul_nr": "ZZ1"}, {"modul_nr": "ZZ2"}])
     modules = load_schedule_from_dataframe(df, ist_zusatzmodul=True)
     assert len(modules) == 2
 
@@ -187,12 +187,12 @@ def test_enabled_filters_out_disallowed_modules(monkeypatch):
     monkeypatch.setattr(
         data_loader,
         "load_zusatzmodule_allowlist",
-        lambda *a, **kw: {"modul_nr": {"BSC-1"}, "kurs_nr": set()},
+        lambda *a, **kw: {"modul_nr": {"ZZ1"}, "kurs_nr": set()},
     )
-    df = _minimal_zusatzmodule_df([{"modul_nr": "BSC-1"}, {"modul_nr": "BSC-2"}])
+    df = _minimal_zusatzmodule_df([{"modul_nr": "ZZ1"}, {"modul_nr": "ZZ2"}])
     modules = load_schedule_from_dataframe(df, ist_zusatzmodul=True)
     assert len(modules) == 1
-    assert modules[0].modul_nr == "BSC-1"
+    assert modules[0].modul_nr == "ZZ1"
 
 
 def test_enabled_never_filters_the_main_upload(monkeypatch):
@@ -207,9 +207,9 @@ def test_enabled_never_filters_the_main_upload(monkeypatch):
     monkeypatch.setattr(
         data_loader,
         "load_zusatzmodule_allowlist",
-        lambda *a, **kw: {"modul_nr": {"BSC-1"}, "kurs_nr": set()},
+        lambda *a, **kw: {"modul_nr": {"ZZ1"}, "kurs_nr": set()},
     )
-    df = _minimal_zusatzmodule_df([{"modul_nr": "BSC-1"}, {"modul_nr": "BSC-2"}])
+    df = _minimal_zusatzmodule_df([{"modul_nr": "ZZ1"}, {"modul_nr": "ZZ2"}])
     modules = load_schedule_from_dataframe(df, ist_zusatzmodul=False)
     assert len(modules) == 2
 
@@ -220,6 +220,6 @@ def test_enabled_with_no_allowlist_file_falls_back_to_unfiltered(monkeypatch, tm
     # than raising or silently dropping every row.
     monkeypatch.setattr(data_loader, "ZUSATZMODULE_ALLOWLIST_ENABLED", True)
     monkeypatch.setattr(data_loader, "ZUSATZMODULE_ALLOWLIST_PATH", tmp_path / "missing.json")
-    df = _minimal_zusatzmodule_df([{"modul_nr": "BSC-1"}, {"modul_nr": "BSC-2"}])
+    df = _minimal_zusatzmodule_df([{"modul_nr": "ZZ1"}, {"modul_nr": "ZZ2"}])
     modules = load_schedule_from_dataframe(df, ist_zusatzmodul=True)
     assert len(modules) == 2

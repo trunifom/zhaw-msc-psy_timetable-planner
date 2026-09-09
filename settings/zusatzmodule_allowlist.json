@@ -1,12 +1,12 @@
 {
-  "_hinweis": "Platzhalter-/Testliste, KEINE echten ZHAW-Daten. Bis die ZHAW eine offizielle Liste der fuer Passerelle-Studierende waehlbaren Bachelor-Zusatzmodule veroeffentlicht, dient diese Datei nur als Struktur-Beispiel fuer src/data_loader.py: load_zusatzmodule_allowlist(). Aktuell ohne Wirkung, da ZUSATZMODULE_ALLOWLIST_ENABLED in data_loader.py auf False steht. Sobald die echte Liste vorliegt: Werte unten ersetzen und das Flag auf True setzen.",
+  "_hinweis": "Platzhalter-/Testliste, KEINE echten ZHAW-Daten. Bis die ZHAW eine offizielle Liste der fuer Passerelle-Studierende waehlbaren Bachelor-Zusatzmodule veroeffentlicht, dient diese Datei nur als Struktur-Beispiel fuer src/data_loader.py: load_zusatzmodule_allowlist(). Aktuell ohne Wirkung, da ZUSATZMODULE_ALLOWLIST_ENABLED in data_loader.py auf False steht. Format orientiert sich an der echten Vorlesungsdaten-BSc-Exportspalte 'Modul-Nr.'/'Kurs-Nr.': Modul-Nr. ist ein kurzer Buchstaben+Zahlen-Code (z. B. 'DI1'), Kurs-Nr. ist immer Modul-Nr. + Bindestrich + laufende Nummer (z. B. 'DI1-1'), nie mit Punkt getrennt. Sobald die echte Liste vorliegt: Werte unten durch die echten Modul-/Kurs-Nummern ersetzen und das Flag auf True setzen - es reicht, nur eine der beiden Listen zu befuellen (siehe _filter_zusatzmodule_by_allowlist: eine Zeile gilt bereits als erlaubt, wenn Modul-Nr. ODER Kurs-Nr. auf der jeweiligen Liste steht).",
   "erlaubte_modul_nr": [
-    "BSC-BEISPIEL-1",
-    "BSC-BEISPIEL-2",
-    "BSC-BEISPIEL-3"
+    "ZZ1",
+    "ZZ2",
+    "ZZ3"
   ],
   "erlaubte_kurs_nr": [
-    "BSC-BEISPIEL-1.1",
-    "BSC-BEISPIEL-2.1"
+    "ZZ1-1",
+    "ZZ2-1"
   ]
 }
