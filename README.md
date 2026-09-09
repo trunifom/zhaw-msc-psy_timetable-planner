@@ -1,4 +1,4 @@
-# ZHAW MSc Psychology Timetable Planner
+# Stundenplan-Planer MSc Psychologie (ZHAW)
 
 Interaktive Streamlit-Anwendung für die modulbasierte Semesterplanung im MSc Psychologie (ZHAW) mit Fokus auf:
 
@@ -10,7 +10,10 @@ Interaktive Streamlit-Anwendung für die modulbasierte Semesterplanung im MSc Ps
 
 ## Ziel des Tools
 
-Die App hilft Studierenden, aus ZHAW-Exportdaten einen realistisch belegbaren Stundenplan zusammenzustellen.
+Die App ist eine Hilfestellung für Studierende: Sie unterstützt dabei, aus den ZHAW-Exportdaten einen
+realistisch belegbaren, konfliktfreien Stundenplan zusammenzustellen, und erlaubt am Ende den Export in ein
+Online-Kalender-Format (ICS), damit die gewählten Kurse direkt als Termine in den persönlichen Kalender
+(z. B. Outlook, Google oder Apple Kalender) importiert werden können.
 Besonders unterstützt werden:
 
 - Modul- und Kurslogik mit Varianten/Gruppen
@@ -112,7 +115,7 @@ Für Studierende, die laut individuellem Studienplan zusätzliche Module aus ein
 - Module aus der Zusatzliste sind in allen Tabellen (geführte Planung, Rohdaten, Wochenplan, Konfliktanalyse) an der Spalte/Markierung "Quelle" (🎓 Zusatzmodul) erkennbar.
 - Kollisionen zwischen einem Hauptmodul und einem Zusatzmodul werden genau wie Kollisionen innerhalb der Hauptliste erkannt - es gibt keinen separaten Prüfpfad.
 - Fehlt in der hochgeladenen Zusatzliste eine Wochentag-Spalte (nur Datum vorhanden, wie bei manchen Bachelor-Exporten), wird der Wochentag automatisch aus dem Datum abgeleitet.
-- Bietet eine Zeitperiode mehrere parallele Angebote mit unterschiedlichen Dozierenden, ohne dass die Zuteilung (z. B. Halbklasse) im Export schon erkennbar ist, werden alle Angebote vorerst übernommen und mit einem Hinweis in Schritt 4 der geführten Planung sichtbar markiert, statt die Mehrdeutigkeit stillschweigend zu verstecken.
+- Bietet eine Zeitperiode mehrere parallele Angebote mit unterschiedlichen Dozierenden, ohne dass die Zuteilung (z. B. Halbklasse) im Export schon erkennbar ist, werden alle Angebote vorerst übernommen und mit einem Hinweis im Abschnitt "Bestandteile je gewähltem Modul" der geführten Planung sichtbar markiert, statt die Mehrdeutigkeit stillschweigend zu verstecken.
 - Wird nur die Zusatzliste wieder entfernt, bleibt die Hauptplanung unverändert bestehen; wird die Hauptdatei entfernt, wird die gesamte Planung (inkl. Zusatzmodule) zurückgesetzt.
 - In Schritt 2 der geführten Planung erscheint (nur wenn eine Zusatzliste hochgeladen wurde) ein zusätzlicher Filter "Alle anzeigen"/"Nur Zusatzmodule"/"Zusatzmodule ausblenden".
 - Das Dashboard zeigt (ebenfalls nur bei vorhandener Zusatzliste) eine zusätzliche Kennzahl "Zusatzmodule ausgewählt".

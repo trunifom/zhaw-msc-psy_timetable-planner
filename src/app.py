@@ -1198,7 +1198,11 @@ def _absence_settings() -> dict[str, Any]:
         appointments), keys "dates_enabled"/"dates".
       - blocked_days: recurring weekly unavailability, e.g. "never on
         Wednesdays" or "never on Wednesday afternoons", keys
-        "blocked_enabled"/"blocked_days"/"blocked_halfday".
+        "blocked_enabled"/"blocked_days"/"blocked_day_halfdays". Each
+        blocked weekday has its OWN half-day choice (e.g. Monday all day,
+        Wednesday afternoon only, Friday morning only, all active at once) -
+        "blocked_day_halfdays" maps weekday key -> "Ganzer Tag"/"Vormittag"/
+        "Nachmittag", not one shared value for every blocked day.
     Any subset of these can be active at once; each rule is evaluated
     independently in _absence_reasons_for_module() and their hits are unioned.
 
@@ -1229,7 +1233,7 @@ def _absence_settings() -> dict[str, Any]:
         "dates": set(st.session_state.get("absence_dates_values", []) or []),
         "blocked_enabled": bool(st.session_state.get("absence_blocked_enabled", False)),
         "blocked_days": normalized_blocked_days,
-        "blocked_halfday": st.session_state.get("absence_blocked_halfday_value", t("guided.full_day")),
+        "blocked_day_halfdays": dict(st.session_state.get("absence_blocked_day_halfdays", {}) or {}),
     }
 
 
@@ -1253,14 +1257,16 @@ def _absence_rules_summary(settings: dict[str, Any]) -> list[str]:
         rules.append(t("dashboard.absence.dates", dates=f"{shown}{suffix}"))
 
     if settings["blocked_enabled"] and settings["blocked_days"]:
-        days = ", ".join(t(f"weekday.{d}") for d in sorted(settings["blocked_days"]))
-        rules.append(
-            t(
-                "dashboard.absence.blocked_days",
-                days=days,
-                halfday=settings["blocked_halfday"],
-            )
+        # Each blocked weekday carries its own half-day choice (see
+        # _absence_settings()'s docstring) - the summary spells that choice
+        # out per day rather than assuming one shared half-day for all of
+        # them, e.g. "Montag (Ganzer Tag), Mittwoch (Nachmittag)".
+        ordered_days = sorted(settings["blocked_days"], key=lambda d: _weekday_keys_in_order().index(d) if d in _weekday_keys_in_order() else 99)
+        halfdays = settings.get("blocked_day_halfdays", {})
+        days = ", ".join(
+            f"{t(f'weekday.{d}')} ({halfdays.get(d, t('guided.full_day'))})" for d in ordered_days
         )
+        rules.append(t("dashboard.absence.blocked_days", days=days))
 
     return rules
 
@@ -1288,8 +1294,10 @@ def _absence_reasons_for_module(module: Any, settings: dict[str, Any]) -> list[s
     if settings["dates_enabled"] and datum_value in settings["dates"]:
         reasons.append(t("absence.reason.date"))
 
-    if settings["blocked_enabled"] and day_key in settings["blocked_days"] and _matches_halfday(module, settings["blocked_halfday"]):
-        reasons.append(t("absence.reason.weekday_halfday", halfday=settings["blocked_halfday"]))
+    if settings["blocked_enabled"] and day_key in settings["blocked_days"]:
+        day_halfday = settings.get("blocked_day_halfdays", {}).get(day_key, t("guided.full_day"))
+        if _matches_halfday(module, day_halfday):
+            reasons.append(t("absence.reason.weekday_halfday", halfday=day_halfday))
 
     return reasons
 
@@ -1492,6 +1500,29 @@ def _style_absence_rows(df: pd.DataFrame, reason_col: str) -> Any:
     return df.style.apply(_row_style, axis=1)
 
 
+def _style_source_rows(df: pd.DataFrame, source_col: str) -> Any:
+    """
+    Tint rows whose `source_col` cell is non-empty (a Zusatzmodul row - see
+    _zusatzmodul_marker()) with the "info" tone, so Passerelle/supplementary
+    rows are visually distinguishable from regular Master rows in one
+    glance, not just via that column's text.
+
+    Only usable on plain `st.dataframe(...)` tables - `st.data_editor(...)`
+    (used for the three guided-planning selection tables) does NOT support
+    pandas Styler output at all (raises an error). Those editable tables
+    use a 🎓 label prefix instead (see the "module"/"course"/"row" mode
+    blocks in render_guided_planning() and _module_to_row()) as the
+    equivalent, data_editor-compatible visual marker.
+    """
+    def _row_style(row: pd.Series) -> list[str]:
+        is_zusatzmodul = bool(str(row.get(source_col, "")).strip())
+        if is_zusatzmodul:
+            return [f"background-color: {_ROW_TONE_COLORS['info']}"] * len(row)
+        return [""] * len(row)
+
+    return df.style.apply(_row_style, axis=1)
+
+
 def _style_risk_rows(df: pd.DataFrame) -> Any:
     """Style course impact table by risk status."""
     status_col = c("risk_status")
@@ -1516,22 +1547,23 @@ def _absence_overlay_for_week(settings: dict[str, Any]) -> pd.DataFrame:
     if not settings.get("blocked_enabled") or not settings.get("blocked_days"):
         return pd.DataFrame()
 
-    # Map the selected half-day option to a wall-clock time range for the
-    # overlay bar; "full day" spans midnight-to-midnight (23:59 as a
-    # practical end-of-day stand-in).
-    halfday = settings.get("blocked_halfday", t("guided.full_day"))
-    if halfday == t("guided.morning"):
-        start = "00:00:00"
-        end = "12:00:00"
-    elif halfday == t("guided.afternoon"):
-        start = "12:00:00"
-        end = "23:59:00"
-    else:
-        start = "00:00:00"
-        end = "23:59:00"
+    # Map each blocked day's OWN half-day option (settings["blocked_day_
+    # halfdays"], see _absence_settings()'s docstring) to a wall-clock time
+    # range for that day's overlay bar; "full day" spans midnight-to-midnight
+    # (23:59 as a practical end-of-day stand-in). Every blocked day gets its
+    # own range here, not one shared range for all of them.
+    halfdays = settings.get("blocked_day_halfdays", {})
+
+    def _halfday_range(halfday: str) -> tuple[str, str]:
+        if halfday == t("guided.morning"):
+            return "00:00:00", "12:00:00"
+        if halfday == t("guided.afternoon"):
+            return "12:00:00", "23:59:00"
+        return "00:00:00", "23:59:00"
 
     rows = []
     for day_key in sorted(settings.get("blocked_days", []), key=lambda d: _weekday_keys_in_order().index(d) if d in _weekday_keys_in_order() else 99):
+        start, end = _halfday_range(halfdays.get(day_key, t("guided.full_day")))
         rows.append(
             {
                 c("weekday"): t(f"weekday.{day_key}"),
@@ -1623,12 +1655,18 @@ def _module_to_row(module: Any, module_id: int, selected: bool) -> dict:
     checkbox column). `module_id` is the row's position in the full
     all_modules list, used later to map checked rows back to module objects."""
     datum_value = getattr(module, "datum", None)
+    # 🎓-Präfix statt echter Zeilenfarbe: st.data_editor unterstützt keine
+    # pandas-Styler-Objekte (siehe Kommentar bei _style_source_rows) - siehe
+    # das gleiche Muster in der "module"/"course" mode-Tabelle oben.
+    module_label = module.modulname
+    if getattr(module, "ist_zusatzmodul", False):
+        module_label = f"🎓 {module_label}"
     return {
         c("select"): selected,
         c("id"): module_id,
         c("module_no"): getattr(module, "modul_nr", None) or "",
         c("course_no"): getattr(module, "kurs_nr", None) or "",
-        c("module"): module.modulname,
+        c("module"): module_label,
         c("weekday"): _weekday_label(module),
         # None (not "") when there's no date, so st.column_config.DateColumn
         # at the call site can render it as a clean blank cell instead of
@@ -1967,6 +2005,29 @@ def _conflict_date_label(module: Any) -> str:
     return datum_value.strftime("%Y-%m-%d")
 
 
+def _conflict_origin_label(left: Any, right: Any) -> str:
+    """
+    Classify a conflict pair by where its two sides come from: both from
+    the main Master list ("Master ↔ Master"), one from each ("Bachelor ↔
+    Master"), or both from a Zusatzmodule/Passerelle upload ("Bachelor ↔
+    Bachelor" - two supplementary-list rows conflicting with each other).
+
+    Requested explicitly because Bachelor-level Passerelle modules clash
+    with Master modules far more often than Master modules clash with each
+    other (different curricula weren't scheduled with each other in mind) -
+    surfacing this breakdown in the Konfliktanalyse tab lets a Passerelle
+    student see at a glance how much of their conflict load is the
+    "expected" Bachelor/Master friction versus a same-curriculum clash.
+    """
+    left_is_zusatz = bool(getattr(left, "ist_zusatzmodul", False))
+    right_is_zusatz = bool(getattr(right, "ist_zusatzmodul", False))
+    if left_is_zusatz and right_is_zusatz:
+        return t("conflicts.origin.bachelor_bachelor")
+    if left_is_zusatz or right_is_zusatz:
+        return t("conflicts.origin.bachelor_master")
+    return t("conflicts.origin.master_master")
+
+
 def _minutes_overlap(left: Any, right: Any) -> int:
     """
     Return the overlap, in minutes, between two modules' time-of-day
@@ -2272,6 +2333,138 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
         legend_title_text=t("chart.legend_modules") if color_by == "module" else t("col.type"),
     )
     return _apply_chart_theme(fig)
+
+
+def _module_short_code(module: Any) -> str:
+    """Short label for one module tile (e.g. the guided-planning semester
+    preview grid): the Modul-Nr when available (e.g. "AS1"), else a short
+    prefix of the base course title (no variant/group suffix) as a
+    readable fallback - unlike _module_group_key(), which is optimized for
+    uniqueness as a grouping key (and so returns a long "BASIS::..." string
+    when Modul-Nr is missing), this is optimized for fitting inside a small
+    chart tile."""
+    modul_nr = str(getattr(module, "modul_nr", "") or "").strip()
+    if modul_nr:
+        return modul_nr
+    base, _, _ = _split_course_variant(module.modulname)
+    return base[:10]
+
+
+# Sentinel color-group label for grid tiles that are NOT part of the
+# student's current selection - deliberately not translated via c()/t() as
+# a *column value* (only ever compared against itself / used as a
+# color_discrete_map key), but the on-screen legend text still needs to be
+# readable, so the actual label is looked up via t() where this is used.
+_SEMESTER_GRID_UNSELECTED_KEY = "__unselected__"
+
+
+def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], color_sequence: list[str] | None = None):
+    """
+    Build a Plotly grid preview spanning the whole semester: one row per
+    calendar week that actually contains a dated session, one column per
+    weekday, one marker per session. Selected modules (guided planning's
+    current selection) are colored per course (same palette convention as
+    _semester_timeline_figure/_weekly_timeline_figure); everything else is
+    a flat light grey, so a student can see at a glance which weeks/days
+    are "theirs" versus what else was on offer.
+
+    Only dated rows (`datum` set) can be placed on a specific week - see
+    this app's core domain premise (models.py module docstring) that each
+    source row is one concrete, dated session, not a recurring weekly
+    pattern. Weeks are grouped/ordered by the ACTUAL MONDAY DATE of their
+    ISO calendar week, not the raw ISO week number - the autumn semester
+    (HS) runs across a calendar-year boundary, where ISO week numbers wrap
+    52/53 -> 1, which would sort incorrectly if used directly.
+
+    Returns (figure_or_None, excluded_undated_count).
+    """
+    selected_ids = {id(m) for m in selected_modules}
+    weekday_order = _weekday_labels_in_order()
+
+    rows = []
+    excluded_undated = 0
+    for module in all_modules:
+        datum_value = getattr(module, "datum", None)
+        if datum_value is None:
+            excluded_undated += 1
+            continue
+
+        week_monday = datum_value - timedelta(days=datum_value.weekday())
+        iso = datum_value.isocalendar()
+        is_selected = id(module) in selected_ids
+        rows.append(
+            {
+                c("week"): f"KW {iso.week} ({week_monday.strftime('%d.%m.')})",
+                "_week_monday": week_monday,
+                c("weekday"): _weekday_label(module),
+                c("module"): _module_label(module),
+                "_short_code": _module_short_code(module),
+                "_color_key": _module_label(module) if is_selected else _SEMESTER_GRID_UNSELECTED_KEY,
+                c("date"): datum_value.strftime("%d.%m.%Y"),
+                c("time"): f"{module.startzeit.strftime('%H:%M')} - {module.endzeit.strftime('%H:%M')}",
+                c("room"): module.raum,
+            }
+        )
+
+    if not rows:
+        return None, excluded_undated
+
+    df = pd.DataFrame(rows)
+    ordered_weeks = (
+        df[[c("week"), "_week_monday"]]
+        .drop_duplicates()
+        .sort_values("_week_monday")[c("week")]
+        .tolist()
+    )
+    present_weekdays = [d for d in weekday_order if d in set(df[c("weekday")])]
+
+    unselected_label = t("guided.step3_preview_unselected_legend")
+    df["_color_key"] = df["_color_key"].replace(_SEMESTER_GRID_UNSELECTED_KEY, unselected_label)
+
+    fig = px.scatter(
+        df,
+        x=c("weekday"),
+        y=c("week"),
+        color="_color_key",
+        color_discrete_sequence=color_sequence,
+        color_discrete_map={unselected_label: "#b5bac6"},
+        text="_short_code",
+        hover_name=c("module"),
+        hover_data={c("date"): True, c("time"): True, c("room"): True, "_color_key": False, "_short_code": False},
+        category_orders={c("weekday"): present_weekdays, c("week"): ordered_weeks},
+    )
+    fig.update_traces(
+        marker=dict(size=34, opacity=0.9, line=dict(width=1, color="rgba(255,255,255,0.6)")),
+        textposition="middle center",
+        textfont=dict(size=10, color="white"),
+    )
+    fig.update_yaxes(autorange="reversed")
+    fig.update_layout(
+        height=max(420, 42 * len(ordered_weeks) + 120),
+        margin=dict(l=10, r=10, t=30, b=10),
+        xaxis_title="",
+        yaxis_title="",
+        legend_title_text="",
+    )
+    return _apply_chart_theme(fig), excluded_undated
+
+
+def _render_semester_preview_grid(all_modules: List[Any], selected_modules: List[Any]) -> None:
+    """
+    Render Schritt 3's "preview" section: the semester grid from
+    _semester_grid_figure() plus the accompanying caption about rows that
+    couldn't be placed (no date). Split out from render_guided_planning()
+    only to keep that already-very-long function's final section short.
+    """
+    st.caption(t("guided.step3_preview_caption"))
+    fig, excluded_undated = _semester_grid_figure(all_modules, selected_modules, color_sequence=_chart_palettes()["default"])
+    if fig is None:
+        st.info(t("guided.step3_preview_no_dates"))
+        return
+
+    st.plotly_chart(fig, use_container_width=True)
+    if excluded_undated:
+        st.caption(t("guided.step3_preview_excluded_caption", count=excluded_undated))
 
 
 def _daily_load_figure(modules: List[Any], color_sequence: list[str] | None = None, split_by_module: bool = False):
@@ -2759,6 +2952,68 @@ def _render_chart_toolbar(
     return filtered, palette, extra_choices
 
 
+def _select_all_controls(state_key: str, all_keys: list) -> tuple[int, list | None]:
+    """
+    Render "select all" / "deselect all" buttons for one of the three
+    guided-planning selection tables (module/course/row mode) and return
+    (version, forced_selection) for the caller to use when building that
+    table's data.
+
+    `st.data_editor` keeps its own edited state under its `key=` once
+    rendered - simply changing the input dataframe's default checkbox
+    values on a later rerun does NOT change what's displayed. This is the
+    same reason the sidebar's Zusatzmodule file uploader has to bump a
+    version counter to force a remount (see that comment in render_sidebar
+    for the established precedent this reuses): a button click here bumps
+    `st.session_state[f"{state_key}_version"]` (the caller interpolates it
+    into the data_editor's `key=` to force a fresh widget instance) and
+    stores a one-shot "pending" selection that's consumed exactly once,
+    right below, in this same script run - a plain widget click already
+    triggers Streamlit's normal rerun, and the pending value/new version
+    number are both read further down in this very function call, so no
+    *extra*, explicit `st.rerun()` is needed to make either one "visible".
+
+    An earlier version of this function DID call `st.rerun()` here, right
+    after setting session_state - reproduced live as the cause of two
+    separate, hard-to-diagnose bugs: with a main *and* a Zusatzmodule file
+    both loaded, clicking "Alle auswählen" silently wiped the entire
+    session back to "please upload a file" (the sidebar's keyless main
+    `st.file_uploader()` lost its value across that extra rerun), and even
+    after giving that uploader an explicit key, the main tab strip's
+    visible content froze on "Geführte Planung" for the rest of the
+    session no matter which tab was clicked next (`st.tabs()` was keyless
+    too). Both symptoms point at the same underlying cause: forcing an
+    *additional* rerun mid-interaction, on top of the one Streamlit already
+    runs for the button click itself, made other keyless widgets elsewhere
+    in this large script lose their stable identity for that one extra
+    pass. Removing the redundant `st.rerun()` calls avoids the whole
+    problem at the source, rather than chasing every individual widget
+    that happens to be keyless.
+
+    Returns:
+        version: interpolate into the data_editor's `key=` for this table.
+        forced_selection: `None` if no button was just clicked (caller
+            should fall back to its own previous-selection tracking); an
+            empty list after "deselect all"; the full `all_keys` after
+            "select all".
+    """
+    version_key = f"{state_key}_version"
+    pending_key = f"{state_key}_pending"
+
+    col_all, col_none = st.columns(2)
+    with col_all:
+        if st.button(t("guided.select_all"), key=f"{state_key}_select_all_btn", width="stretch"):
+            st.session_state[pending_key] = list(all_keys)
+            st.session_state[version_key] = st.session_state.get(version_key, 0) + 1
+    with col_none:
+        if st.button(t("guided.deselect_all"), key=f"{state_key}_deselect_all_btn", width="stretch"):
+            st.session_state[pending_key] = []
+            st.session_state[version_key] = st.session_state.get(version_key, 0) + 1
+
+    forced_selection = st.session_state.pop(pending_key, None)
+    return st.session_state.get(version_key, 0), forced_selection
+
+
 def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     """
     Guided, German-first course planning assistant with dynamic questions.
@@ -2769,31 +3024,41 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     itself, right before returning) so it drives the other tabs (dashboard,
     timetable, conflicts, export) on subsequent reruns.
 
-    Overall flow (rendered top-to-bottom as numbered "step" sections):
-      Step 1 - Absence rules: three yes/no questions (period / individual
+    Overall flow (rendered top-to-bottom; only Schritt 1/2/3 are numbered
+    in the UI - see the "guided.step*" i18n keys - the selection-mode
+    widgets and the module component/status sections in between are
+    unnumbered subsections of Schritt 2, not separate numbered steps):
+      Schritt 1 - Absence rules: three yes/no questions (period / individual
         dates / recurring blocked weekdays) that populate the
         st.session_state.absence_* keys read by _absence_settings()
         elsewhere. These rules don't filter what's selectable here; they
         drive the absence-risk warnings shown in the dashboard/conflicts
         tabs and the blocked-day overlay in the timetable chart.
-      Step 2 - Search/filter widgets: free-text and structured filters
+      Schritt 2 - Search/filter widgets: free-text and structured filters
         (Modul-Nr, Kurs-Nr, keyword, module type, weekday, lecturer) that
         narrow `all_modules` down to a working set `filtered` before any
         selection UI is shown - this keeps large catalogs manageable.
-      Step 3 - Selection mode: the student picks one of three granularities
-        for making their selection (radio "selection_mode"):
+        Immediately below the filters, the student picks one of three
+        granularities for making their selection (radio "selection_mode"):
           - "module" mode: select whole modules (grouped by Modul-Nr /
             base title via _module_group_key), then, per selected module,
             resolve mandatory vs. choice course components (see the
             variant-family logic below - this is the most complex path).
+            Two unnumbered subsections follow only in this mode: a
+            per-module component breakdown expander
+            ("module_components_heading"), then a status table
+            summarizing completeness (any open mandatory choices?) and
+            conflicts per module ("module_status_heading").
           - "course" mode: select whole base courses (grouped by
             _split_course_variant's base title), including all their
             variants at once - coarser-grained than "module" mode.
           - "row" mode: select individual schedule rows directly via a
             checkbox data_editor - the finest-grained, most manual option.
-      Step 4/5 (only in "module" mode): a per-module component breakdown
-        expander, followed by a status table summarizing completeness
-        (any open mandatory choices?) and conflicts per module.
+      Schritt 3 - Timetable preview: a read-only weekly/semester overview
+        (_render_semester_preview_grid()) showing the student's current
+        selection in color against every other offered course in light
+        grey, so they can sanity-check the shape of their plan before
+        moving on to the dashboard/conflicts/export tabs.
 
     Because Streamlit reruns this whole function on every widget
     interaction, all cross-rerun choices (selected keys, filter values) are
@@ -2822,11 +3087,75 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 )
             )
 
+        # Order matters here: blocked weekdays/half-days is asked FIRST
+        # because it's the question most students actually have an answer
+        # to (a recurring "never Wednesday afternoon" pattern), followed by
+        # the less common absence period, and finally individual absent
+        # dates last (the rarest case) - see guided.q.* help texts for
+        # concrete examples of each.
+        has_blocked_days = st.radio(
+            t("guided.q.blocked_days"),
+            options=[t("guided.no"), t("guided.yes")],
+            horizontal=True,
+            key="q_blocked_days",
+            help=t("guided.q.blocked_days_help"),
+        )
+
+        blocked_days = []
+        blocked_day_halfdays: dict[str, str] = {}
+        if has_blocked_days == t("guided.yes"):
+            blocked_days = st.multiselect(
+                t("guided.blocked_days"),
+                options=_blocking_weekday_keys(),
+                format_func=lambda day_key: t(f"weekday.{day_key}"),
+                key="blocked_days",
+            )
+
+            if blocked_days:
+                # One independent half-day choice PER selected weekday (a
+                # fictional example: Monday whole day, Wednesday afternoon
+                # only, Friday morning only - all active at once), not one
+                # shared choice applied to every selected weekday. A small
+                # editable table (one row per weekday) with a per-row
+                # dropdown is the natural fit for this - Streamlit's
+                # SelectboxColumn already supports per-row option lists.
+                ordered_selected_days = [d for d in _blocking_weekday_keys() if d in blocked_days]
+                prev_halfdays = st.session_state.get("absence_blocked_day_halfdays", {}) or {}
+                halfday_rows = [
+                    {
+                        c("weekday"): t(f"weekday.{day_key}"),
+                        c("period"): prev_halfdays.get(day_key, t("guided.full_day")),
+                    }
+                    for day_key in ordered_selected_days
+                ]
+                edited_halfdays = st.data_editor(
+                    pd.DataFrame(halfday_rows),
+                    hide_index=True,
+                    width="stretch",
+                    disabled=[c("weekday")],
+                    column_config={
+                        c("period"): st.column_config.SelectboxColumn(
+                            c("period"),
+                            options=[t("guided.full_day"), t("guided.morning"), t("guided.afternoon")],
+                        )
+                    },
+                    key="blocked_day_halfday_editor",
+                )
+                # Row order is preserved by data_editor (no sorting/
+                # reordering happens), so zipping back against
+                # ordered_selected_days is safe.
+                blocked_day_halfdays = dict(zip(ordered_selected_days, edited_halfdays[c("period")].tolist()))
+
+        st.session_state.absence_blocked_enabled = has_blocked_days == t("guided.yes")
+        st.session_state.absence_blocked_days_values = blocked_days
+        st.session_state.absence_blocked_day_halfdays = blocked_day_halfdays
+
         has_absence_period = st.radio(
             t("guided.q.absence_period"),
             options=[t("guided.no"), t("guided.yes")],
             horizontal=True,
             key="q_absence_period",
+            help=t("guided.q.absence_period_help"),
         )
 
         absence_start = None
@@ -2897,6 +3226,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             options=[t("guided.no"), t("guided.yes")],
             horizontal=True,
             key="q_absent_dates",
+            help=t("guided.q.absent_dates_help"),
         )
 
         absent_dates = []
@@ -2917,107 +3247,97 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         st.session_state.absence_dates_enabled = has_absent_dates == t("guided.yes")
         st.session_state.absence_dates_values = absent_dates
 
-        has_blocked_days = st.radio(
-            t("guided.q.blocked_days"),
-            options=[t("guided.no"), t("guided.yes")],
+    # Schritt 2 (search/filter) and the former Schritt 3 (make a selection)
+    # are one merged card/section now - a student searches for courses and
+    # picks them in the same place, instead of two separate numbered steps
+    # that used to feel disconnected. Manual __enter__()/__exit__() (the
+    # same trick this function already used for the old, now-merged step3
+    # card) rather than `with card(...):`, since this now spans the filter
+    # widgets, the "no matches" early
+    # return, AND the large three-way selection-mode branch further down -
+    # reindenting all of that under one `with` would be pure, risky
+    # mechanical churn for no behavioral benefit. The card's title is
+    # static (no longer embeds the match count - that count is only known
+    # after the filters below have run, i.e. after the header would
+    # already have been drawn) and is shown as a caption instead, right
+    # after the filters.
+    guided_step2_card = card("guided-step2", "🔍", t("guided.step2_title").strip("*"))
+    guided_step2_card.__enter__()
+
+    modul_nr_search = st.text_input(
+        t("guided.search.modul_nr"),
+        placeholder=t("guided.search.modul_nr_placeholder"),
+        key="filter_modul_nr",
+    ).strip().lower()
+
+    kurs_nr_search = st.text_input(
+        t("guided.search.kurs_nr"),
+        placeholder=t("guided.search.kurs_nr_placeholder"),
+        key="filter_kurs_nr",
+    ).strip().lower()
+
+    search_text = st.text_input(
+        t("guided.search.text"),
+        placeholder=t("guided.search.text_placeholder"),
+        key="filter_search",
+    ).strip().lower()
+
+    base_search_text = st.text_input(
+        t("guided.search.base"),
+        placeholder=t("guided.search.base_placeholder"),
+        key="filter_base_search",
+    ).strip().lower()
+
+    module_types = sorted({str(getattr(m, "modultyp", t("common.na"))) for m in all_modules if getattr(m, "modultyp", None)})
+    selected_types = st.multiselect(
+        t("guided.filter.types"),
+        options=module_types,
+        key="filter_module_types",
+    )
+
+    weekdays_present = sorted({_weekday_label(m) for m in all_modules})
+    selected_weekdays = st.multiselect(
+        t("guided.filter.weekdays"),
+        options=weekdays_present,
+        key="filter_weekdays",
+    )
+
+    lecturers = sorted(
+        {
+            str(getattr(m, "dozierende", "N/A"))
+            for m in all_modules
+            if getattr(m, "dozierende", None)
+        }
+    )
+    selected_lecturers = st.multiselect(
+        t("guided.filter.lecturers"),
+        options=lecturers,
+        key="filter_lecturers",
+    )
+
+    # Only shown when a Zusatzmodule upload actually contributed rows
+    # to all_modules (see docs/planung/KONZEPT-passerelle-
+    # zusatzmodule.md section 4.3) - progressive disclosure, so the
+    # large majority of students without a Passerelle background never
+    # see this filter at all.
+    zusatz_filter_mode = t("guided.filter.zusatzmodule_all")
+    if any(getattr(m, "ist_zusatzmodul", False) for m in all_modules):
+        zusatz_filter_mode = st.radio(
+            t("guided.filter.zusatzmodule"),
+            options=[
+                t("guided.filter.zusatzmodule_all"),
+                t("guided.filter.zusatzmodule_only"),
+                t("guided.filter.zusatzmodule_hide"),
+            ],
+            key="filter_zusatzmodule_mode",
             horizontal=True,
-            key="q_blocked_days",
         )
 
-        blocked_days = []
-        blocked_halfday = t("guided.full_day")
-        if has_blocked_days == t("guided.yes"):
-            blocked_days = st.multiselect(
-                t("guided.blocked_days"),
-                options=_blocking_weekday_keys(),
-                format_func=lambda day_key: t(f"weekday.{day_key}"),
-                key="blocked_days",
-            )
-            blocked_halfday = st.selectbox(
-                t("guided.blocked_range"),
-                options=[t("guided.full_day"), t("guided.morning"), t("guided.afternoon")],
-                key="blocked_halfday",
-            )
-
-        st.session_state.absence_blocked_enabled = has_blocked_days == t("guided.yes")
-        st.session_state.absence_blocked_days_values = blocked_days
-        st.session_state.absence_blocked_halfday_value = blocked_halfday
-
-    with card("guided-step2", "🔍", t("guided.step2").strip("*")):
-        modul_nr_search = st.text_input(
-            t("guided.search.modul_nr"),
-            placeholder=t("guided.search.modul_nr_placeholder"),
-            key="filter_modul_nr",
-        ).strip().lower()
-
-        kurs_nr_search = st.text_input(
-            t("guided.search.kurs_nr"),
-            placeholder=t("guided.search.kurs_nr_placeholder"),
-            key="filter_kurs_nr",
-        ).strip().lower()
-
-        search_text = st.text_input(
-            t("guided.search.text"),
-            placeholder=t("guided.search.text_placeholder"),
-            key="filter_search",
-        ).strip().lower()
-
-        base_search_text = st.text_input(
-            t("guided.search.base"),
-            placeholder=t("guided.search.base_placeholder"),
-            key="filter_base_search",
-        ).strip().lower()
-
-        module_types = sorted({str(getattr(m, "modultyp", t("common.na"))) for m in all_modules if getattr(m, "modultyp", None)})
-        selected_types = st.multiselect(
-            t("guided.filter.types"),
-            options=module_types,
-            key="filter_module_types",
-        )
-
-        weekdays_present = sorted({_weekday_label(m) for m in all_modules})
-        selected_weekdays = st.multiselect(
-            t("guided.filter.weekdays"),
-            options=weekdays_present,
-            key="filter_weekdays",
-        )
-
-        lecturers = sorted(
-            {
-                str(getattr(m, "dozierende", "N/A"))
-                for m in all_modules
-                if getattr(m, "dozierende", None)
-            }
-        )
-        selected_lecturers = st.multiselect(
-            t("guided.filter.lecturers"),
-            options=lecturers,
-            key="filter_lecturers",
-        )
-
-        # Only shown when a Zusatzmodule upload actually contributed rows
-        # to all_modules (see docs/planung/KONZEPT-passerelle-
-        # zusatzmodule.md section 4.3) - progressive disclosure, so the
-        # large majority of students without a Passerelle background never
-        # see this filter at all.
-        zusatz_filter_mode = t("guided.filter.zusatzmodule_all")
-        if any(getattr(m, "ist_zusatzmodul", False) for m in all_modules):
-            zusatz_filter_mode = st.radio(
-                t("guided.filter.zusatzmodule"),
-                options=[
-                    t("guided.filter.zusatzmodule_all"),
-                    t("guided.filter.zusatzmodule_only"),
-                    t("guided.filter.zusatzmodule_hide"),
-                ],
-                key="filter_zusatzmodule_mode",
-                horizontal=True,
-            )
-
-        sort_mode = st.selectbox(
-            t("guided.sort"),
-            options=[t("guided.sort.date"), t("guided.sort.weekday"), t("guided.sort.name")],
-            key="filter_sort_mode",
-        )
+    sort_mode = st.selectbox(
+        t("guided.sort"),
+        options=[t("guided.sort.date"), t("guided.sort.weekday"), t("guided.sort.name")],
+        key="filter_sort_mode",
+    )
 
     filtered: List[Any] = []
     absent_date_set = set(absent_dates)
@@ -3072,21 +3392,12 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     else:
         filtered.sort(key=lambda m: str(m.modulname).lower())
 
-    # Manual __enter__()/__exit__() instead of `with card(...):` (unlike
-    # every other card() call in this file): the selection dispatch below is
-    # a large three-way branch (module/course/row mode, ~380 lines) with an
-    # early `return []` a few lines down - wrapping it in a `with` block
-    # would mean reindenting that entire already-risky branching block just
-    # to add a border. card() is @contextmanager-decorated, so it supports
-    # this directly; __exit__() is called explicitly before each of this
-    # function's two `return` statements instead of relying on `with`/
-    # `try/finally` to do it automatically.
-    step3_card = card("guided-step3", "✅", t("guided.step3_title", count=len(filtered)).strip("*"))
-    step3_card.__enter__()
+    st.caption(t("guided.step2_match_count", count=len(filtered)))
+
     if not filtered:
         st.warning(t("guided.no_matches"))
         st.session_state.selected_modules = []
-        step3_card.__exit__(None, None, None)
+        guided_step2_card.__exit__(None, None, None)
         return []
 
     selection_mode = st.radio(
@@ -3097,9 +3408,12 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         help=t("guided.selection_mode_help"),
     )
 
+    # Default True: exam dates should not be forgotten just because a
+    # student didn't think to tick this box - they must actively opt OUT
+    # of exams, not opt in.
     include_exams = st.checkbox(
         t("guided.include_exams"),
-        value=False,
+        value=True,
         key="include_exams",
     )
 
@@ -3129,6 +3443,8 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             key = _module_group_key(module)
             grouped_modules.setdefault(key, []).append(module)
 
+        module_version, module_forced_selection = _select_all_controls("module_selector", sorted(grouped_modules.keys()))
+
         module_rows = []
         selected_keys_prev = set(st.session_state.get("selected_course_bases", []))
         for key, items in sorted(grouped_modules.items(), key=lambda pair: _module_group_display(pair[0], pair[1]).lower()):
@@ -3139,9 +3455,17 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             last_date = dates[-1].strftime("%Y-%m-%d") if dates else ""
             date_range = f"{first_date} - {last_date}" if first_date and last_date else ""
             label = _module_group_display(key, items)
+            # 🎓-Präfix statt echter Zeilenfarbe: st.data_editor akzeptiert
+            # keine pandas-Styler-Objekte (siehe Kommentar bei
+            # _style_source_rows), daher die gleiche Markierung wie in der
+            # Konfliktanzeige (render_conflict_analysis) - zusätzlich zur
+            # bestehenden Text-Spalte "Quelle".
+            if getattr(items[0], "ist_zusatzmodul", False):
+                label = f"🎓 {label}"
+            is_selected = (key in module_forced_selection) if module_forced_selection is not None else (key in selected_keys_prev)
             module_rows.append(
                 {
-                    c("select"): key in selected_keys_prev,
+                    c("select"): is_selected,
                     c("module_group"): label,
                     c("module_key"): key,
                     c("courses"): len(courses),
@@ -3165,7 +3489,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             width="stretch",
             disabled=[c("module_group"), c("module_key"), c("courses"), c("rows"), c("exam_dates"), c("period"), c("source")],
             column_config={c("select"): st.column_config.CheckboxColumn(c("select"))},
-            key="module_group_selector_editor",
+            key=f"module_group_selector_editor_{module_version}",
         )
 
         selected_keys = set(edited_module_df.loc[edited_module_df[c("select")] == True, c("module_key")].tolist())
@@ -3175,7 +3499,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         selected_by_module_key: dict[str, list[Any]] = {}
         module_status_rows = []
 
-        st.markdown(t("guided.step4"))
+        st.markdown(t("guided.module_components_heading"))
 
         # "module" mode, part B: for every module the student checked above,
         # resolve its internal structure into "mandatory" vs. "choice"
@@ -3351,7 +3675,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 row[c("status")] = t("guided.status.incomplete_conflicts")
 
         if module_status_rows:
-            st.markdown(t("guided.step5"))
+            st.markdown(t("guided.module_status_heading"))
             status_tones = {
                 t("guided.status.complete"): "success",
                 t("guided.status.incomplete"): "warning",
@@ -3379,6 +3703,8 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             is_exam = bool(getattr(module, "ist_pruefung", False) or name_exam_flag)
             grouped.setdefault(base, []).append((module_id, module, variant, is_exam))
 
+        course_version, course_forced_selection = _select_all_controls("course_selector", sorted(grouped.keys()))
+
         group_rows = []
         selected_bases_prev = set(st.session_state.get("selected_course_bases", []))
         for base, items in sorted(grouped.items(), key=lambda item: item[0].lower()):
@@ -3388,14 +3714,20 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             first_date = dates[0].strftime("%Y-%m-%d") if dates else ""
             last_date = dates[-1].strftime("%Y-%m-%d") if dates else ""
             date_range = f"{first_date} - {last_date}" if first_date and last_date else ""
-            default_selected = base in selected_bases_prev
+            default_selected = (base in course_forced_selection) if course_forced_selection is not None else (base in selected_bases_prev)
 
             # Same "one group, one source" assumption as the "module" mode
             # table above (items[0] is representative of the whole group).
+            # 🎓-Präfix statt echter Zeilenfarbe - siehe Kommentar bei der
+            # "module" mode-Tabelle oben (gleicher Grund: data_editor
+            # unterstützt keine Styler-Objekte).
+            base_label = base
+            if getattr(items[0][1], "ist_zusatzmodul", False):
+                base_label = f"🎓 {base}"
             group_rows.append(
                 {
                     c("select"): default_selected,
-                    c("base_course"): base,
+                    c("base_course"): base_label,
                     c("rows"): len(items),
                     c("variants_count"): len(variants),
                     c("exam_dates"): exam_count,
@@ -3411,10 +3743,18 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             width="stretch",
             disabled=[c("base_course"), c("rows"), c("variants_count"), c("exam_dates"), c("period"), c("source")],
             column_config={c("select"): st.column_config.CheckboxColumn(c("select"))},
-            key="course_group_selector_editor",
+            key=f"course_group_selector_editor_{course_version}",
         )
 
-        selected_bases = set(edited_groups.loc[edited_groups[c("select")] == True, c("base_course")].tolist())
+        # base_label (possibly 🎓-prefixed) round-trips through the table's
+        # own c("base_course") column, so it must be stripped back to the
+        # plain `base` key here before it's used to look up `grouped` again
+        # below (course_details_expander) or persisted to selected_course_
+        # bases (shared session-state key with "module" mode, which stores
+        # plain, unprefixed keys).
+        selected_bases = {
+            b.removeprefix("🎓 ") for b in edited_groups.loc[edited_groups[c("select")] == True, c("base_course")].tolist()
+        }
         st.session_state.selected_course_bases = sorted(selected_bases)
 
         selected_modules = []
@@ -3442,6 +3782,13 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         # be mapped back to module objects below via `selected_ids`/
         # `modules_with_id`, since data_editor returns a plain DataFrame,
         # not the original objects.
+        included_ids = [
+            module_id
+            for module_id, module in filtered_with_ids
+            if include_exams or not _split_course_variant(module.modulname)[2]
+        ]
+        row_version, row_forced_selection = _select_all_controls("row_selector", included_ids)
+
         rows = []
         excluded_exam_rows = 0
         for module_id, module in filtered_with_ids:
@@ -3449,7 +3796,11 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             if (not include_exams) and is_exam:
                 excluded_exam_rows += 1
                 continue
-            rows.append(_module_to_row(module, module_id, selected_lookup.get(id(module), False)))
+            if row_forced_selection is not None:
+                default_selected = module_id in row_forced_selection
+            else:
+                default_selected = selected_lookup.get(id(module), False)
+            rows.append(_module_to_row(module, module_id, default_selected))
 
         if excluded_exam_rows:
             st.caption(t("guided.exams_hidden_caption", count=excluded_exam_rows))
@@ -3488,7 +3839,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 c("end"): st.column_config.TimeColumn(c("end"), format="HH:mm", width="small"),
                 c("ects"): st.column_config.NumberColumn(c("ects"), width="small"),
             },
-            key="course_selector_editor",
+            key=f"course_selector_editor_{row_version}",
         )
 
         selected_ids = set(edited.loc[edited[c("select")] == True, c("id")].tolist())
@@ -3496,7 +3847,11 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 
     st.info(t("guided.current_selection", selected=len(selected_modules), filtered=len(filtered)))
     st.session_state.selected_modules = selected_modules
-    step3_card.__exit__(None, None, None)
+    guided_step2_card.__exit__(None, None, None)
+
+    with card("guided-step3-preview", "🗓️", t("guided.step3_preview_title").strip("*")):
+        _render_semester_preview_grid(all_modules, selected_modules)
+
     return selected_modules
 
 
@@ -3560,10 +3915,25 @@ def render_sidebar() -> None:
         with card("sidebar-data", "📁", t("sidebar.section.data")):
             st.caption(t("sidebar.data_description"))
 
+            # Explicit `key=` (not just relying on Streamlit's auto-generated
+            # widget identity): without it, this uploader lost its already-
+            # attached file - reverting to "no file", which then falsely
+            # triggered the full-reset `else` branch below - the moment
+            # ANOTHER widget elsewhere in the same rerun used a *dynamically
+            # changing* key (e.g. the guided-planning "Alle auswählen" button
+            # bumping its data_editor's key, see _select_all_controls()).
+            # Reproduced live: with both a main and a Zusatzmodule file
+            # loaded, clicking "Alle auswählen" called st.rerun(), and on
+            # that very next run this uploader's auto-generated identity
+            # shifted enough to come back empty, wiping the whole session
+            # even though the user never touched either upload widget. A
+            # stable, explicit key removes that dependency on the rest of
+            # the script's widget layout entirely.
             uploaded_file = st.file_uploader(
                 t("sidebar.upload_label"),
                 type=["csv", "xlsx", "xls"],
-                help=t("sidebar.upload_help")
+                help=t("sidebar.upload_help"),
+                key="sidebar_upload_main",
             )
 
             if uploaded_file is not None:
@@ -3968,7 +4338,8 @@ def render_timetable(modules: List) -> None:
 
             with st.expander(t("timetable.day_expander", day=day, count=len(daily_mods)), expanded=day_blocked):
                 if day_blocked:
-                    st.error(t("timetable.blocked_day_warning", halfday=settings.get("blocked_halfday", t("guided.full_day"))))
+                    day_halfday = settings.get("blocked_day_halfdays", {}).get(day_key, t("guided.full_day"))
+                    st.error(t("timetable.blocked_day_warning", halfday=day_halfday))
 
                 if daily_mods:
                     # A real table instead of stacked markdown/caption lines
@@ -4080,10 +4451,28 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
                     c("overlap_min"): overlap,
                     c("overlap_pct_module_1"): round((overlap / left_duration) * 100, 1),
                     c("overlap_pct_module_2"): round((overlap / right_duration) * 100, 1),
+                    c("conflict_type"): _conflict_origin_label(left, right),
                 }
             )
 
         conflict_df = pd.DataFrame(conflict_rows).sort_values([c("date"), c("overlap_min"), c("weekday")], ascending=[True, False, True])
+
+        # Only worth calling out when Zusatzmodule are actually part of the
+        # picture at all (progressive disclosure, same rationale as the
+        # sidebar upload card and the guided-planning Zusatzmodule filter) -
+        # a student with no Passerelle upload would otherwise see a "0 of N
+        # are Bachelor<->Master" caption that tells them nothing useful.
+        bachelor_master_count = sum(
+            1 for row in conflict_rows if row[c("conflict_type")] == t("conflicts.origin.bachelor_master")
+        )
+        if any(getattr(m, "ist_zusatzmodul", False) for m in selected_modules):
+            st.caption(
+                t(
+                    "conflicts.origin_breakdown_caption",
+                    bachelor_master=bachelor_master_count,
+                    total=len(conflict_rows),
+                )
+            )
 
         with card("conflicts-summary", "📊", t("conflicts.summary_title").strip("*")):
             if not conflict_summary_df.empty:
@@ -4215,7 +4604,7 @@ def render_raw_data() -> None:
                 # object for c("date") (not a pre-formatted string) so
                 # DateColumn can actually parse and reformat it.
                 st.dataframe(
-                    sel_df,
+                    _style_source_rows(sel_df, c("source")),
                     width="stretch",
                     hide_index=True,
                     column_config={
@@ -4263,18 +4652,32 @@ def main() -> None:
     st.markdown(t("app.subtitle"))
 
     with card("app-quickstart", "🚀", t("app.quickstart_title")):
+        st.markdown(t("app.purpose_text"))
         st.caption(t("app.quickstart_text"))
 
     selected_modules = st.session_state.processed_modules
 
-    # Create UI Tabs for a cleaner application state
-    tab_guided, tab_dashboard, tab_timetable, tab_conflicts, tab_data = st.tabs([
-        t("app.tab.guided"),
-        t("app.tab.dashboard"),
-        t("app.tab.timetable"),
-        t("app.tab.conflicts"),
-        t("app.tab.raw")
-    ])
+    # Create UI Tabs for a cleaner application state.
+    # Explicit `key=` for the same reason as the sidebar file uploaders'
+    # (see the comment there): without it, this widget's auto-generated
+    # identity isn't guaranteed stable once ANOTHER widget elsewhere in the
+    # same rerun uses a dynamically changing key. Reproduced live: clicking
+    # "Alle auswählen" in guided planning (which bumps its data_editor's key
+    # and calls st.rerun(), see _select_all_controls()) left the tab strip's
+    # own aria-selected state working correctly on every later click, but
+    # the actual visible panel silently froze on "Geführte Planung" no
+    # matter which tab was clicked afterwards - an explicit key fixes this
+    # the same way it fixed the uploader.
+    tab_guided, tab_dashboard, tab_timetable, tab_conflicts, tab_data = st.tabs(
+        [
+            t("app.tab.guided"),
+            t("app.tab.dashboard"),
+            t("app.tab.timetable"),
+            t("app.tab.conflicts"),
+            t("app.tab.raw"),
+        ],
+        key="main_tabs",
+    )
 
     with tab_guided:
         # This call also writes its result to st.session_state.selected_modules
