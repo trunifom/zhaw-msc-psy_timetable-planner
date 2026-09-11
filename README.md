@@ -32,6 +32,7 @@ Besonders unterstützt werden:
 	- Paar-Zusammenfassung
 	- Detailansicht nach Datum und Uhrzeit
 	- Überlappungsminuten und Prozentwerten
+- **Anwesenheits-Ampel** (🚦, sichtbar im Dashboard und im Konfliktanalyse-Tab): zeigt pro Kurs, wie viel Prozent der Termine mit der aktuellen Auswahl und den Abwesenheits-Regeln realistisch besuchbar sind (rot/orange/grün). Ist die offizielle Mindestanforderung eines Kurses in den Quelldaten bekannt (Spalte "Anwesenheitspflicht"), wird exakt dagegen geprüft; fehlt sie - der heutige Regelfall - dient die ZHAW-übliche Orientierung (mind. 50 %, teils 80 % oder 100 %) als Näherung. Die Ampel berücksichtigt sowohl erkannte Terminkollisionen als auch aktive Abwesenheits-Regeln, keine offizielle Anwesenheitskontrolle.
 - Design-System (durchgängig auf allen 5 Tabs plus Sidebar, Light/Dark umschaltbar über eine eigene "Darstellung"-Sektion in der Sidebar):
 	- einheitliche Karten-Sektionen (Icon + Titel + Trennlinie) statt reiner Whitespace-Trennung
 	- konsistente Semantikfarben (Erfolg/Warnung/Kritisch/Info) über die ganze App, sowohl als Badges/Zeilenfärbung in Tabellen als auch in Charts
@@ -102,6 +103,8 @@ streamlit run src/app.py
 4. Im Tab "Wochenplan" Verteilung pro Tag prüfen
 5. Im Tab "Konfliktanalyse" Kollisionen auflösen
 6. Export am Ende freischalten und als XLSX/ICS herunterladen
+
+**Tipp bei Schritt 2:** Jeder Klick auf ein Auswahl-Kästchen in den Kurslisten-Tabellen lädt die Seite kurz neu. Bitte jeweils kurz warten, bis das fertig ist, bevor das nächste Kästchen angeklickt wird - sonst kann die vorherige Auswahl verloren gehen (Hinweis dazu erscheint auch direkt über den Tabellen in der App).
 
 Zusätzliche Einstellungen in der Sidebar bzw. im Dashboard:
 
@@ -198,7 +201,7 @@ pytest:
 pytest -q
 ```
 
-195 Tests über 7 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`, `tests/test_zusatzmodule_fixtures.py`, `tests/test_deployment_config.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen (deckt auch die `feedback.*`-Keys des Feedback-Tabs ab), Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten), mehrerer Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden, `requirements.txt`-numpy-Pin) und der umfangreichen Zusatzmodul-/Passerellen-Tests gegen realistisch grosse, aus den echten HS26-Katalogen fiktionalisierte Testdaten (Wochentag-Ableitung, `ist_zusatzmodul`-Kennzeichnung, Konflikterkennung über Haupt- und Zusatzliste hinweg, Modul-Nr.-Kollisionsszenario, Export bei realistischem Umfang). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
+210 Tests über 8 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`, `tests/test_zusatzmodule_fixtures.py`, `tests/test_zusatzmodule_allowlist.py`, `tests/test_deployment_config.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen (deckt auch die `feedback.*`-Keys des Feedback-Tabs ab), Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten), mehrerer Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden, `requirements.txt`-numpy-Pin) und der umfangreichen Zusatzmodul-/Passerellen-Tests gegen realistisch grosse, aus den echten HS26-Katalogen fiktionalisierte Testdaten (Wochentag-Ableitung, `ist_zusatzmodul`-Kennzeichnung, Konflikterkennung über Haupt- und Zusatzliste hinweg, Modul-Nr.-Kollisionsszenario, Export bei realistischem Umfang). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
 
 ## Testdaten
 

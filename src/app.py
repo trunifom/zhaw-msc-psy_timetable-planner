@@ -31,7 +31,7 @@ How to run:
 import streamlit as st
 import pandas as pd
 import logging
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Optional
 from datetime import date, timedelta
 from contextlib import contextmanager
 from urllib.parse import quote
@@ -88,6 +88,15 @@ try:
     # NEU: Export-Funktionen hier in den Try-Block aufnehmen
     from export import prepare_timetable_for_export, generate_excel_download, generate_ics_download
     MODULES_AVAILABLE = True
+    # Streamlit re-executes this whole script on every user interaction, but
+    # `logger` itself (fetched via logging.getLogger) is a singleton that
+    # survives across those reruns within the same process - so a flag stored
+    # on it (rather than a plain module-level variable, which would reset
+    # every rerun) lets this fire exactly once per `streamlit run` process,
+    # right after a successful start, instead of on every click.
+    if not getattr(logger, "_startup_logged", False):
+        logger.info("App gestartet - alle Backend-Module erfolgreich geladen, bereit fuer Nutzeraktionen.")
+        logger._startup_logged = True
 except ImportError as e:
     MODULES_AVAILABLE = False
     # This is a setup/deployment problem (wrong working directory, missing
@@ -228,7 +237,7 @@ THEME_TOKENS: dict[str, dict[str, str]] = {
 # under the most common forms of color vision deficiency - offered
 # explicitly rather than only as an implicit default, per this app's
 # accessibility-in-color-coding principle (see also
-# _style_absence_rows/_style_risk_rows, which pair color with text/labels
+# _style_absence_rows/_style_attendance_rows, which pair color with text/labels
 # rather than relying on color alone for the same reason).
 #
 # "default" ("Standard" in the UI, and the selectbox's first/pre-selected
@@ -791,7 +800,7 @@ def badge(text: str, kind: str = "info") -> str:
     color token - callers must still pass a `text` that also conveys the
     status in words (e.g. "OK"/"Risiko"), since color alone must never be
     the only signal (see this app's color-accessibility principle, also
-    applied in _style_absence_rows/_style_risk_rows). Must be rendered with
+    applied in _style_absence_rows/_style_attendance_rows). Must be rendered with
     st.markdown(..., unsafe_allow_html=True) by the caller.
     """
     safe_kind = kind if kind in {"success", "warning", "danger", "info"} else "info"
@@ -1280,8 +1289,8 @@ def _absence_reasons_for_module(module: Any, settings: dict[str, Any]) -> list[s
     empty list means the row is unaffected by any absence rule. This is the
     single source of truth other helpers build on: _absence_conflict_dataframe
     calls it per-row to decide which rows to list, and
-    _absence_course_impact_dataframe uses "has any reason" as its per-row
-    impact flag.
+    _attendance_status_dataframe folds "has any reason" (unioned with time
+    conflicts) into its per-row "at risk" flag.
     """
     reasons: list[str] = []
     datum_value = getattr(module, "datum", None)
@@ -1331,32 +1340,65 @@ def _absence_conflict_dataframe(modules: List[Any], settings: dict[str, Any]) ->
     return pd.DataFrame(rows).sort_values([c("date"), c("weekday"), c("time")], ascending=[True, True, True])
 
 
-def _absence_course_impact_dataframe(modules: List[Any], settings: dict[str, Any]) -> pd.DataFrame:
+def _attendance_tier(attendable_pct: float, req_pct: Optional[float]) -> tuple[str, str]:
     """
-    Summarize absence impact per base course (grouped by _module_group_title,
-    i.e. Modul-Nr where available) and flag a risk status against each
-    course's mandatory-attendance requirement.
+    Map an "attendable %" figure to a (tone, i18n-status-key-suffix) pair,
+    used by _attendance_status_dataframe()/_style_attendance_rows().
 
-    Risk computation:
-      - `attendance_req_pct` (col c("attendance_req_pct")) comes from the
-        source data's `anwesenheitspflicht_prozent` field (e.g. "80" means
-        the student must attend at least 80% of that course's sessions).
-        Not every course specifies this - if it's missing, risk stays
-        "unknown" because we simply have no threshold to compare against.
-      - `allowed_absence_pct` = 100 - attendance_req_pct, i.e. the maximum
-        share of sessions the student is permitted to miss while still
-        satisfying the requirement.
-      - `absence_pct` = (rows hit by an active absence rule) / (total rows
-        for that course) * 100, i.e. what fraction of this course's
-        sessions the student's current absence settings would actually make
-        them miss.
-      - risk_status is "high" when absence_pct exceeds allowed_absence_pct
-        (the student is on track to violate the attendance requirement),
-        "ok" when it's within the allowed budget, and "unknown" when no
-        requirement percentage was available to compare against at all.
+    Two modes, depending on whether the source data specifies this course's
+    actual mandatory-attendance requirement (`anwesenheitspflicht_prozent`):
+      - `req_pct` known: exact comparison - "critical" (red) if the
+        realistically attendable share would fall short of the stated
+        requirement, "ok" (green) otherwise. No middle tier here since we
+        have precise data to compare against.
+      - `req_pct` unknown (the common case today - see models.py's
+        anwesenheitspflicht_prozent docstring, most real ZHAW exports don't
+        carry this column yet): fall back to the generic ZHAW policy bands
+        from the 2026-09 planning meeting - a course is only ever *required*
+        to be attended at 50% minimum, so being attendable at or below that
+        floor is treated as "critical" even without course-specific data;
+        <=80% is "warning" (may still violate a stricter per-course
+        requirement, e.g. 80% or 100%, that we simply don't know about);
+        above 80% is "ok".
+    """
+    if req_pct is not None:
+        return ("danger", "critical") if attendable_pct < req_pct else ("success", "ok")
+    if attendable_pct <= 50:
+        return ("danger", "critical")
+    if attendable_pct <= 80:
+        return ("warning", "warning")
+    return ("success", "ok")
+
+
+def _attendance_status_dataframe(modules: List[Any], settings: dict[str, Any]) -> pd.DataFrame:
+    """
+    Summarize, per base course (grouped by _module_group_title, i.e.
+    Modul-Nr where available), how much of that course's sessions the
+    student can realistically attend given their current selection - and
+    flag a traffic-light status against it. This is the data behind the
+    "Anwesenheits-Ampel" (dashboard + Konflikte-Tab).
+
+    A session counts as "at risk" (not realistically attendable) when
+    EITHER it collides in time with another session in `modules`
+    (find_time_conflicts - the student can only physically be in one place)
+    OR it matches an active absence rule (_absence_reasons_for_module - the
+    student has declared themselves unavailable then). These two sources
+    are unioned per row, not summed, so a session hit by both only counts
+    once. `attendable_pct` = 100 - (at-risk rows / total rows for that
+    course) * 100.
+
+    See _attendance_tier() for how `attendable_pct` (plus the course's own
+    `anwesenheitspflicht_prozent`, when the source data has it) becomes the
+    red/orange/green status shown in `c("attendance_status")`.
     """
     if not modules:
         return pd.DataFrame()
+
+    conflict_pairs = find_time_conflicts(modules)
+    conflicted_ids: set[int] = set()
+    for left, right in conflict_pairs:
+        conflicted_ids.add(id(left))
+        conflicted_ids.add(id(right))
 
     totals: dict[str, dict[str, Any]] = {}
     for module in modules:
@@ -1365,16 +1407,13 @@ def _absence_course_impact_dataframe(modules: List[Any], settings: dict[str, Any
             totals[key] = {
                 c("base_course"): key,
                 c("rows"): 0,
-                c("absence_rows"): 0,
-                c("absence_pct"): 0.0,
+                "_at_risk_rows": 0,
                 c("attendance_req_pct"): None,
-                c("allowed_absence_pct"): None,
-                c("risk_status"): t("absence.risk.unknown"),
             }
 
         totals[key][c("rows")] += 1
-        if _absence_reasons_for_module(module, settings):
-            totals[key][c("absence_rows")] += 1
+        if id(module) in conflicted_ids or _absence_reasons_for_module(module, settings):
+            totals[key]["_at_risk_rows"] += 1
 
         raw_req = getattr(module, "anwesenheitspflicht_prozent", None)
         if raw_req is not None and totals[key][c("attendance_req_pct")] is None:
@@ -1386,25 +1425,28 @@ def _absence_course_impact_dataframe(modules: List[Any], settings: dict[str, Any
     rows = []
     for row in totals.values():
         total = max(1, int(row[c("rows")]))
-        impacted = int(row[c("absence_rows")])
-        absence_pct = round((impacted / total) * 100.0, 1)
-        row[c("absence_pct")] = absence_pct
+        at_risk = row.pop("_at_risk_rows")
+        attendable_pct = round(100.0 - (at_risk / total) * 100.0, 1)
+        row[c("attendable_pct")] = attendable_pct
 
         req = row[c("attendance_req_pct")]
-        if req is None:
-            row[c("allowed_absence_pct")] = None
-            row[c("risk_status")] = t("absence.risk.unknown")
-        else:
-            allowed = max(0.0, min(100.0, 100.0 - float(req)))
-            row[c("allowed_absence_pct")] = round(allowed, 1)
-            row[c("risk_status")] = t("absence.risk.high") if absence_pct > allowed else t("absence.risk.ok")
+        _, status_key = _attendance_tier(attendable_pct, req)
+        row[c("attendance_status")] = t(f"attendance.status.{status_key}")
+        # Display as a formatted string, not a bare float/None: st.dataframe
+        # renders a missing (NaN/None) cell in an otherwise-numeric column as
+        # the literal word "None" (a Streamlit grid quirk, not a pandas
+        # formatting choice) - which would show up constantly here, since
+        # most source exports don't carry anwesenheitspflicht_prozent yet
+        # (see that field's docstring in models.py). An empty string avoids
+        # the placeholder entirely.
+        row[c("attendance_req_pct")] = "" if req is None else f"{req:g}"
 
         rows.append(row)
 
     df = pd.DataFrame(rows)
     if df.empty:
         return df
-    return df.sort_values([c("absence_pct"), c("absence_rows"), c("base_course")], ascending=[False, False, True])
+    return df.sort_values([c("attendable_pct"), c("base_course")], ascending=[True, True])
 
 
 # Semantic row-tint colors for pandas Styler output, expressed as the same
@@ -1468,7 +1510,7 @@ def _style_sequential_red(df: pd.DataFrame, value_col: str) -> Any:
     import time, so this was a real, previously-shipped, latent crash
     (see docs/TESTING-README.md's regression-test notes) rather than a
     theoretical concern. Every other Styler helper in this file
-    (_style_absence_rows, _style_risk_rows, _style_status_column) already
+    (_style_absence_rows, _style_attendance_rows, _style_status_column) already
     only emits plain CSS strings for exactly this reason.
     """
     values = df[value_col].astype(float)
@@ -1523,15 +1565,24 @@ def _style_source_rows(df: pd.DataFrame, source_col: str) -> Any:
     return df.style.apply(_row_style, axis=1)
 
 
-def _style_risk_rows(df: pd.DataFrame) -> Any:
-    """Style course impact table by risk status."""
-    status_col = c("risk_status")
+def _attendance_column_config() -> dict[str, Any]:
+    """Shared st.dataframe column_config for _attendance_status_dataframe
+    tables (dashboard + Konflikte tab) - without it, `c("attendable_pct")`
+    renders with a raw float's full decimal expansion (e.g. "75.000000")
+    instead of the already-rounded one-decimal value."""
+    return {c("attendable_pct"): st.column_config.NumberColumn(c("attendable_pct"), format="%.1f %%")}
+
+
+def _style_attendance_rows(df: pd.DataFrame) -> Any:
+    """Style the attendance-status table (_attendance_status_dataframe) by
+    its red/orange/green tier."""
+    status_col = c("attendance_status")
 
     def _row_style(row: pd.Series) -> list[str]:
         status = str(row.get(status_col, ""))
-        if status == t("absence.risk.high"):
+        if status == t("attendance.status.critical"):
             return [f"background-color: {_ROW_TONE_COLORS['danger']}"] * len(row)
-        if status == t("absence.risk.ok"):
+        if status == t("attendance.status.ok"):
             return [f"background-color: {_ROW_TONE_COLORS['success']}"] * len(row)
         return [f"background-color: {_ROW_TONE_COLORS['warning']}"] * len(row)
 
@@ -1947,7 +1998,7 @@ def _module_to_ui_row(module: Any) -> dict:
 def _module_group_title(module: Any) -> str:
     """Short group title for one module: its Modul-Nr if available, else its
     base course title (no variant suffix). Used as the grouping key for
-    dashboard/absence summaries (e.g. _absence_course_impact_dataframe),
+    dashboard/absence summaries (e.g. _attendance_status_dataframe),
     distinct from _module_group_display which additionally needs a `modules`
     list to render the "<Modul-Nr> - <title>" combined display form."""
     modul_nr = str(getattr(module, "modul_nr", "") or "").strip()
@@ -2759,22 +2810,53 @@ def _weekly_timeline_figure(modules: List[Any], color_mode: str = "multi", color
     # every trace down to nothing worth showing - the legend is turned off
     # entirely below instead, since a one-entry legend reading "single"
     # would be pure noise.
+    #
+    # Long course names are also truncated here (full name stays available
+    # via hover and the on-bar "short_label" text, see docstring) - a real
+    # ZHAW course title can be 60+ characters, and Plotly's default legend
+    # sizes itself to fit the longest entry, which shrank the actual
+    # weekday timeline down to a sliver next to a wall of legend text
+    # (reported by a user with real course data). Capped independently of
+    # the horizontal/wrapping legend layout below, since even one very long
+    # name is enough to trigger the same squeeze.
     _seen_legend_names: set[str] = set()
+    _LEGEND_NAME_MAX_LEN = 40
 
     def _dedupe_legend_name(trace):
         base_name = trace.name.split(",")[0].strip() if trace.name else trace.name
-        trace.update(name=base_name, showlegend=base_name not in _seen_legend_names)
+        display_name = base_name
+        if display_name and len(display_name) > _LEGEND_NAME_MAX_LEN:
+            display_name = display_name[: _LEGEND_NAME_MAX_LEN - 1].rstrip() + "…"
+        trace.update(name=display_name, showlegend=base_name not in _seen_legend_names)
         _seen_legend_names.add(base_name)
 
     fig.for_each_trace(_dedupe_legend_name)
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(
         height=420,
-        margin=dict(l=10, r=10, t=20, b=10),
+        margin=dict(l=10, r=10, t=20, b=90),
         xaxis_title=t("chart.xaxis_time"),
         yaxis_title="",
         showlegend=(color_mode != "single"),
         legend_title_text=t("chart.legend_modules"),
+        # Horizontal, wrapped legend below the plot instead of Plotly's
+        # default vertical legend to the right - a right-side legend eats
+        # into the SAME horizontal space the weekday timeline needs, so
+        # with many/long course names it visibly squeezed the chart itself
+        # down to a narrow strip. Below the plot, a wide/wrapping legend
+        # only costs extra vertical space (via the enlarged bottom margin
+        # above), never the timeline's own width. `entrywidth` caps each
+        # entry so Plotly wraps to additional rows instead of one
+        # ever-widening single line.
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.18,
+            xanchor="left",
+            x=0,
+            entrywidth=160,
+            entrywidthmode="pixels",
+        ),
     )
     fig.update_xaxes(tickformat="%H:%M")
     return _apply_chart_theme(fig)
@@ -2929,11 +3011,40 @@ def _render_chart_toolbar(
                 all_weekdays_in_order = _weekday_labels_in_order()
                 present = {_weekday_label(m) for m in modules}
                 present_weekdays = [d for d in all_weekdays_in_order if d in present]
+
+                # st.multiselect only applies `default=` the very first time
+                # this `key` is ever created - every later rerun restores
+                # whatever is already in st.session_state[key] instead,
+                # intersected against the current `options`. If the
+                # available weekdays change (a new file upload with a
+                # different weekday spread, or even just switching the UI
+                # language - _weekday_label() returns a translated string,
+                # so "Montag" and "Monday" are different option values for
+                # this widget) and the OLD stored selection shares zero
+                # weekdays with the new `present_weekdays`, that
+                # intersection silently collapses to `[]` - no error, no
+                # warning. Every chart built from `filtered` below then
+                # receives an empty modules list and renders nothing (see
+                # each figure builder's `if not modules: return None`
+                # guard) - reported by a user whose real data hit exactly
+                # this: every Dashboard/Wochenplan chart came up blank with
+                # no visible error. Fixed by remembering which weekday set
+                # this widget's stored value was last built against, and
+                # resetting it back to "everything selected" whenever that
+                # set changes, instead of trusting Streamlit's silent
+                # options-intersection to never land on an empty selection.
+                options_sig_key = f"{settings_key}_weekdays_options_sig"
+                widget_key = f"{settings_key}_weekdays"
+                options_sig = tuple(present_weekdays)
+                if st.session_state.get(options_sig_key) != options_sig:
+                    st.session_state[widget_key] = list(present_weekdays)
+                    st.session_state[options_sig_key] = options_sig
+
                 selected_weekdays = st.multiselect(
                     t("chart.settings_weekday_filter"),
                     options=present_weekdays,
                     default=present_weekdays,
-                    key=f"{settings_key}_weekdays",
+                    key=widget_key,
                 )
                 filtered = [m for m in modules if _weekday_label(m) in selected_weekdays]
 
@@ -3483,6 +3594,14 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             )
 
         module_df = pd.DataFrame(module_rows)
+        # Each checkbox click triggers a full script rerun to commit the
+        # edit - clicking a DIFFERENT checkbox again before that rerun has
+        # finished (page still reloading) can lose the just-made selection,
+        # since the new click arrives while the previous one is still
+        # in flight. Confirmed with a real user across multiple browsers:
+        # the table itself is fine, clicking faster than the rerun settles
+        # is what causes a selection to silently revert.
+        st.caption(t("guided.checkbox_click_hint"))
         edited_module_df = st.data_editor(
             module_df,
             hide_index=True,
@@ -3676,6 +3795,15 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 
         if module_status_rows:
             st.markdown(t("guided.module_status_heading"))
+            # "Vollständig"/"Unvollständig" is about open EITHER/OR choices
+            # only (see the open_choices logic above) - completely
+            # independent of how many rows ended up selected. Without this
+            # caption, a module showing "0" selected rows next to
+            # "Vollständig" reads as contradictory (a real user report) even
+            # though it's working as designed - e.g. an exam-only module
+            # with "Prüfungen einschliessen" unchecked has nothing left to
+            # choose (hence complete) and legitimately contributes zero rows.
+            st.caption(t("guided.module_status_caption"))
             status_tones = {
                 t("guided.status.complete"): "success",
                 t("guided.status.incomplete"): "warning",
@@ -3686,6 +3814,14 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 _style_status_column(pd.DataFrame(module_status_rows), c("status"), status_tones),
                 hide_index=True,
                 width="stretch",
+                column_config={
+                    c("open_choice_components"): st.column_config.NumberColumn(
+                        c("open_choice_components"), help=t("guided.module_status.open_choice_help")
+                    ),
+                    c("selected_rows"): st.column_config.NumberColumn(
+                        c("selected_rows"), help=t("guided.module_status.selected_rows_help")
+                    ),
+                },
             )
 
     elif selection_mode == t("guided.mode.course"):
@@ -3737,6 +3873,9 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             )
 
         df_groups = pd.DataFrame(group_rows)
+        # See the identical caption/comment at the "module" mode's
+        # data_editor above - same underlying cause, same table type.
+        st.caption(t("guided.checkbox_click_hint"))
         edited_groups = st.data_editor(
             df_groups,
             hide_index=True,
@@ -3806,6 +3945,9 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             st.caption(t("guided.exams_hidden_caption", count=excluded_exam_rows))
 
         df_choice = pd.DataFrame(rows)
+        # See the identical caption/comment at the "module" mode's
+        # data_editor above - same underlying cause, same table type.
+        st.caption(t("guided.checkbox_click_hint"))
         edited = st.data_editor(
             df_choice,
             hide_index=True,
@@ -4095,15 +4237,17 @@ def render_dashboard(modules: List) -> None:
                 zusatz_selected_count = sum(1 for m in modules if getattr(m, "ist_zusatzmodul", False))
                 st.metric(t("dashboard.metric.zusatzmodule"), zusatz_selected_count)
 
-    # Condensed on purpose: this card used to also reproduce the full
-    # per-course risk table and the "all offered courses" absence-conflict
-    # table (identical in shape/content to render_conflict_analysis's
-    # "conflicts-absence" card, just with a different .head() truncation
-    # cap) - a dashboard should answer "does MY current selection have a
-    # problem" in one glance, not re-render another tab's deep-dive wholesale.
-    # Only the selection-specific status stays here; the full breakdown by
-    # course/risk lives exclusively in the Konfliktanalyse tab now, with a
-    # pointer below instead of a duplicate render.
+    # Condensed on purpose: this card used to also reproduce the "all
+    # offered courses" absence-conflict table (identical in shape/content to
+    # render_conflict_analysis's "conflicts-absence" card, just with a
+    # different .head() truncation cap) - a dashboard should answer "does MY
+    # current selection have a problem" in one glance, not re-render another
+    # tab's deep-dive wholesale. Only the selection-specific status stays
+    # here, with a pointer below instead of a duplicate render. The
+    # per-course attendance traffic light IS duplicated below (dash-
+    # attendance card), deliberately - unlike the absence-conflict detail
+    # table, it's the one thing students said they want visible immediately
+    # without digging into the Konflikte tab first.
     with card("dash-absence", "🧭", t("dashboard.section.absence")):
         if not absence_rules:
             st.info(t("dashboard.absence.none"))
@@ -4120,6 +4264,25 @@ def render_dashboard(modules: List) -> None:
                 st.dataframe(_style_absence_rows(absence_selected_df, c("reason")), hide_index=True, width="stretch")
 
             st.caption(t("dashboard.absence.see_conflicts_tab"))
+
+    # Always visible regardless of absence-rule configuration - see
+    # _attendance_status_dataframe()'s docstring for the red/orange/green
+    # logic. This is the "Anwesenheits-Ampel" from the 2026-09 planning
+    # meeting: students should know at a glance whether their current
+    # selection realistically satisfies each course's attendance
+    # requirement, even before touching the absence-rule widgets.
+    attendance_df = _attendance_status_dataframe(modules, absence_settings)
+    with card("dash-attendance", "🚦", t("dashboard.section.attendance")):
+        st.caption(t("dashboard.attendance.caption"))
+        if attendance_df.empty:
+            st.info(t("dashboard.attendance.none"))
+        else:
+            st.dataframe(
+                _style_attendance_rows(attendance_df),
+                hide_index=True,
+                width="stretch",
+                column_config=_attendance_column_config(),
+            )
 
     overlap_summary = _calculate_module_overlap_summary(modules)
     exam_df = _calculate_exam_feasibility(modules)
@@ -4150,6 +4313,14 @@ def render_dashboard(modules: List) -> None:
                 busiest_day, busiest_count = _busiest_weekday(weekday_modules)
                 if busiest_day:
                     st.caption(t("dashboard.chart.weekday_insight", day=busiest_day, count=busiest_count))
+            else:
+                # Previously silent (no chart, no message) whenever
+                # weekday_modules ended up empty - which used to happen
+                # invisibly via a stale weekday-filter selection (see
+                # _render_chart_toolbar's fix for that). Kept as a fallback
+                # even after that fix, so a genuinely empty filter result
+                # always explains itself instead of leaving a mysterious gap.
+                st.info(t("dashboard.chart.no_data"))
         with chart_col2:
             st.markdown(t("dashboard.chart.overlap_title"))
             st.caption(t("dashboard.chart.overlap_caption"))
@@ -4159,6 +4330,8 @@ def render_dashboard(modules: List) -> None:
             fig = _overlap_bar_figure(overlap_summary, color_scale=overlap_scale)
             if fig is not None:
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info(t("dashboard.chart.no_data"))
 
         st.divider()
         st.markdown(t("dashboard.section.semester_timeline"))
@@ -4324,6 +4497,8 @@ def render_timetable(modules: List) -> None:
         fig = _weekly_timeline_figure(filtered_modules, color_mode=color_mode, color_sequence=palette)
         if fig is not None:
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info(t("dashboard.chart.no_data"))
 
     with card("timetable-daily", "📋", t("timetable.section.daily_details")):
         settings = _absence_settings()
@@ -4408,7 +4583,7 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
     absence_settings = _absence_settings()
     absence_selected_df = _absence_conflict_dataframe(selected_modules, absence_settings)
     absence_all_df = _absence_conflict_dataframe(all_modules, absence_settings)
-    absence_course_df = _absence_course_impact_dataframe(selected_modules, absence_settings)
+    absence_course_df = _attendance_status_dataframe(selected_modules, absence_settings)
 
     if not selected_modules and not conflicts and absence_all_df.empty:
         st.info(t("conflicts.empty_hint"))
@@ -4532,6 +4707,23 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
             st.caption(t("conflicts.interpretation_text"))
 
     with card("conflicts-absence", "🧭", t("conflicts.absence_title").strip("*")):
+        # Attendance status is driven by time conflicts AND absence rules
+        # (see _attendance_status_dataframe), so it must render on its own
+        # emptiness check - NOT nested under the absence-rule-only
+        # `absence_all_df.empty` gate below, which would otherwise hide it
+        # whenever no absence rule happens to be configured (a normal case:
+        # a student who only cares about time conflicts).
+        st.markdown(t("conflicts.absence_course_title"))
+        if absence_course_df.empty:
+            st.info(t("conflicts.absence_course_none"))
+        else:
+            st.dataframe(
+                _style_attendance_rows(absence_course_df),
+                hide_index=True,
+                width="stretch",
+                column_config=_attendance_column_config(),
+            )
+
         if absence_all_df.empty:
             st.info(t("conflicts.absence_none"))
         else:
@@ -4540,12 +4732,6 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
             else:
                 st.warning(t("conflicts.absence_selected_found", count=len(absence_selected_df)))
                 st.dataframe(_style_absence_rows(absence_selected_df, c("reason")), hide_index=True, width="stretch")
-
-            st.markdown(t("conflicts.absence_course_title"))
-            if absence_course_df.empty:
-                st.info(t("conflicts.absence_course_none"))
-            else:
-                st.dataframe(_style_risk_rows(absence_course_df), hide_index=True, width="stretch")
 
             st.caption(t("conflicts.absence_all_caption", count=len(absence_all_df)))
             st.dataframe(_style_absence_rows(absence_all_df.head(80), c("reason")), hide_index=True, width="stretch")
