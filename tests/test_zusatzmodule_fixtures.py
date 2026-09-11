@@ -31,7 +31,7 @@ import pytest
 from data_loader import load_schedule_from_dataframe
 from export import generate_excel_download, generate_ics_download, prepare_timetable_for_export
 from models import Weekday
-from scheduler import find_time_conflicts
+from scheduler import find_time_conflicts, find_critical_first_session_conflicts
 
 REAL_BSC_PATH = Path(__file__).resolve().parent.parent / "data" / "real" / "Vorlesungsdaten BSc HS26_P.xlsx"
 REAL_MSC_PATH = Path(__file__).resolve().parent.parent / "data" / "real" / "Vorlesungsdaten MSc HS26.xlsx"
@@ -303,6 +303,30 @@ def test_konflikt_szenario_detects_the_engineered_overlap():
     # supplementary module gets checked against their main schedule, not
     # just that *some* conflict was found.
     assert {left.ist_zusatzmodul, right.ist_zusatzmodul} == {True, False}
+
+
+def test_konflikt_szenario_is_also_flagged_as_a_critical_first_session_conflict():
+    # KFH1/KFZ1 each have exactly one row in this engineered fixture pair -
+    # i.e. that single session IS each module's "1st session" by
+    # definition, so the same engineered overlap used above to prove
+    # find_time_conflicts() works across catalogs should also be caught by
+    # find_critical_first_session_conflicts() (the Passerelle "don't miss a
+    # course's intro session" feature), end-to-end against real fixture
+    # data rather than only hand-built ZHAWModules (see
+    # tests/test_scheduler.py for the narrow unit tests of that function).
+    main_modules = _load(KONFLIKT_HAUPTLISTE_PATH, ist_zusatzmodul=False)
+    zusatz_modules = _load(KONFLIKT_ZUSATZLISTE_PATH, ist_zusatzmodul=True)
+    combined = main_modules + zusatz_modules
+
+    family_key = lambda m: m.kurs_nr or m.modul_nr  # noqa: E731 - mirrors app.py's _module_course_family_key closely enough for this fixture
+    critical = find_critical_first_session_conflicts(combined, family_key)
+
+    assert len(critical) == 1
+    entry = critical[0]
+    conflicting_modul_nrs = {entry["left"].modul_nr, entry["right"].modul_nr}
+    assert conflicting_modul_nrs == {"KFH1", "KFZ1"}
+    assert entry["left_session_position"] == 1
+    assert entry["right_session_position"] == 1
 
 
 def test_konflikt_szenario_non_overlapping_pair_is_not_flagged():

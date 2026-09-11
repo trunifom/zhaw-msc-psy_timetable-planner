@@ -31,7 +31,8 @@ translated for free, with no separate `hovertemplate` needed. See
 ## Key Naming Rules
 - Keep keys stable and lowercase.
 - Use namespaces:
-  - `app.*`, `sidebar.*`, `guided.*`, `dashboard.*`, `conflicts.*`, `raw.*`, `export.*`, `chart.*`, `feedback.*`, `attendance.*`
+  - `app.*`, `sidebar.*`, `guided.*`, `dashboard.*`, `conflicts.*`, `raw.*`, `export.*`, `chart.*`, `feedback.*`, `attendance.*`, `passerelle_critical.*`
+  - `passerelle_critical.*` is a deliberate exception to the "namespace by tab/section" rule above: its text (the "why does this matter" rationale and the actionable tips) is shown verbatim in two different places (the Dashboard and Konfliktanalyse tabs' "kritische Ersttermine" cards) rather than being duplicated under both `dashboard.*` and `conflicts.*` - keep any future addition to this explanation under the shared `passerelle_critical.*` prefix too, not copied into a tab-specific one, so the two call sites can never drift apart.
   - `col.*` for DataFrame column names
 - Do not reuse one key for different meanings.
 - Prefer short, explicit keys over ambiguous ones.

@@ -30,7 +30,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import time, datetime
-from typing import Iterable
+from typing import Callable, Iterable
 from pydantic import ValidationError
 
 # Import the strictly validated domain model and enum from our data layer
@@ -149,6 +149,102 @@ def find_time_conflicts(modules: Iterable[ZHAWModule]) -> list[tuple[ZHAWModule,
                 conflicts.append((left, right))
 
     return conflicts
+
+
+def find_critical_first_session_conflicts(
+    modules: Iterable[ZHAWModule],
+    family_key: Callable[[ZHAWModule], str],
+    protected_sessions: int = 2,
+) -> list[dict]:
+    """
+    Passerelle-specific narrowing of find_time_conflicts(): flag only the
+    conflicts a Passerelle student most needs to act on.
+
+    Background: a Passerelle student's schedule combines Master modules
+    with Bachelor "Zusatzmodule" (see ZHAWModule.ist_zusatzmodul), and the
+    two catalogs collide far more often than two Master modules normally
+    would. Not every collision is avoidable - but a collision landing on a
+    course's FIRST or SECOND session is much higher-stakes than a later
+    one: ZHAW courses conventionally use those early sessions to cover
+    assessment requirements ("Leistungsnachweise"), exam format, group
+    assignment ("Gruppenbildung"), the course structure ("Ablauf") and the
+    reading list - information a student can't easily recover later
+    (unlike catching up on regular course content).
+
+    This is deliberately a pure function over a plain `ZHAWModule` list
+    (like find_time_conflicts itself), NOT tied to any Streamlit
+    session_state - so unlike almost everything else this app's UI layer
+    (src/app.py) surfaces, it can be (and is, see tests/test_scheduler.py)
+    covered by ordinary pytest unit tests.
+
+    Args:
+        modules: the schedule to check (typically a student's current
+            selection) - passed through to find_time_conflicts() as-is.
+        family_key: groups `modules` into "one course component" for the
+            purpose of counting "1st/2nd session" - the caller supplies
+            this (src/app.py's `_module_course_family_key`, which prefers
+            Kurs-Nr and falls back to a parsed base title) rather than
+            this module reimplementing that grouping/variant-parsing
+            logic, keeping scheduler.py decoupled from app.py's course-
+            title parsing rules.
+        protected_sessions: how many of a family's earliest dated,
+            non-exam sessions count as "critical" (default 2, matching
+            "the first 1-2 sessions" from the feature request - both
+            positions are treated as equally critical, no severity
+            distinction between 1st and 2nd).
+
+    A family's own exam rows (`ist_pruefung=True`) and undated rows
+    (`datum is None`) are excluded before counting "1st"/"2nd" - an exam
+    slot doesn't carry the intro information described above, and an
+    undated row has no reliable chronological position to assign.
+
+    Returns:
+        One dict per flagged conflict pair: `{"left": ZHAWModule, "right":
+        ZHAWModule, "left_session_position": int | None,
+        "right_session_position": int | None}` - the 1-based position
+        within its own family for whichever side(s) are protected (`None`
+        for a side that isn't). A pair is only included when AT LEAST ONE
+        side is a Zusatzmodul (i.e. not a pure Master-vs-Master conflict -
+        that's what the regular conflict analysis already covers) AND AT
+        LEAST ONE side is protected.
+    """
+    module_list = list(modules or [])
+
+    families: dict[str, list[ZHAWModule]] = {}
+    for module in module_list:
+        if getattr(module, "ist_pruefung", False):
+            continue
+        if getattr(module, "datum", None) is None:
+            continue
+        families.setdefault(family_key(module), []).append(module)
+
+    session_position: dict[int, int] = {}
+    for items in families.values():
+        for position, module in enumerate(sorted(items, key=lambda m: m.datum), start=1):
+            if position > protected_sessions:
+                break
+            session_position[id(module)] = position
+
+    results: list[dict] = []
+    for left, right in find_time_conflicts(module_list):
+        if not (getattr(left, "ist_zusatzmodul", False) or getattr(right, "ist_zusatzmodul", False)):
+            continue  # pure Master-vs-Master - not this feature's concern
+
+        left_position = session_position.get(id(left))
+        right_position = session_position.get(id(right))
+        if left_position is None and right_position is None:
+            continue
+
+        results.append(
+            {
+                "left": left,
+                "right": right,
+                "left_session_position": left_position,
+                "right_session_position": right_position,
+            }
+        )
+
+    return results
 
 
 # ==========================================

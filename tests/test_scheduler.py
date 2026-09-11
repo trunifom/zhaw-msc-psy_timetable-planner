@@ -1,15 +1,16 @@
 """
-Tests for src/scheduler.py's `find_time_conflicts` - the active
-conflict-detection logic used by the "Konfliktanalyse" tab and the guided
-planning module-status check. (The rest of scheduler.py is unused legacy
-prototype code - see the module docstring in src/scheduler.py - and is not
-covered here.)
+Tests for src/scheduler.py's `find_time_conflicts` and
+`find_critical_first_session_conflicts` - the active conflict-detection
+logic used by the "Konfliktanalyse" tab and the guided planning
+module-status check. (The rest of scheduler.py is unused legacy prototype
+code - see the module docstring in src/scheduler.py - and is not covered
+here.)
 """
 
 from datetime import date
 
 from models import ZHAWModule
-from scheduler import find_time_conflicts
+from scheduler import find_time_conflicts, find_critical_first_session_conflicts
 
 
 def make_module(**overrides):
@@ -120,3 +121,100 @@ def test_each_conflicting_pair_reported_only_once():
     assert len(conflicts) == 3
     pair_names = {frozenset((x.modulname, y.modulname)) for x, y in conflicts}
     assert pair_names == {frozenset(("Modul A", "Modul B")), frozenset(("Modul A", "Modul C")), frozenset(("Modul B", "Modul C"))}
+
+
+# ==========================================
+# find_critical_first_session_conflicts
+# ==========================================
+# Passerelle-specific narrowing of find_time_conflicts(): only conflicts
+# where >=1 side is a Zusatzmodul (ist_zusatzmodul=True) AND >=1 side falls
+# within its own course's first 2 dated, non-exam sessions (see that
+# function's docstring in src/scheduler.py for the full rationale - missed
+# assessment/exam/group-assignment info in an early session is hard to
+# recover later). `family_key` groups rows into "one course" - tests use a
+# simple kurs_nr-based key, mirroring app.py's real
+# `_module_course_family_key` closely enough for this logic (which only
+# needs *a* stable per-course grouping, not app.py's title-parsing rules).
+
+
+def _family_key(module: ZHAWModule) -> str:
+    return module.kurs_nr or module.modulname
+
+
+def test_first_session_conflict_between_zusatzmodul_and_main_is_flagged():
+    zusatz_first = make_module(
+        modulname="BSc Kurs", kurs_nr="B1", ist_zusatzmodul=True,
+        datum=date(2026, 9, 14), startzeit="08:00", endzeit="10:00",
+    )
+    zusatz_second = make_module(
+        modulname="BSc Kurs", kurs_nr="B1", ist_zusatzmodul=True,
+        datum=date(2026, 9, 21), startzeit="08:00", endzeit="10:00",
+    )
+    main_module = make_module(
+        modulname="MSc Kurs", kurs_nr="M1", ist_zusatzmodul=False,
+        datum=date(2026, 9, 14), startzeit="09:00", endzeit="11:00",
+    )
+    results = find_critical_first_session_conflicts([zusatz_first, zusatz_second, main_module], _family_key)
+    assert len(results) == 1
+    entry = results[0]
+    involved = {entry["left"].modulname, entry["right"].modulname}
+    assert involved == {"BSc Kurs", "MSc Kurs"}
+    zusatz_side = entry["left"] if entry["left"].ist_zusatzmodul else entry["right"]
+    zusatz_position = entry["left_session_position"] if entry["left"].ist_zusatzmodul else entry["right_session_position"]
+    assert zusatz_side.datum == date(2026, 9, 14)
+    assert zusatz_position == 1
+
+
+def test_third_session_conflict_is_not_flagged():
+    # Both courses' 3rd dated session collide - neither side is within its
+    # own family's protected first-2 window (each family also has two
+    # earlier, non-conflicting sessions), so nothing should be flagged even
+    # though a Zusatzmodul is involved.
+    zusatz_rows = [
+        make_module(modulname="BSc Kurs", kurs_nr="B1", ist_zusatzmodul=True, datum=date(2026, 9, 14), startzeit="08:00", endzeit="10:00"),
+        make_module(modulname="BSc Kurs", kurs_nr="B1", ist_zusatzmodul=True, datum=date(2026, 9, 21), startzeit="08:00", endzeit="10:00"),
+        make_module(modulname="BSc Kurs", kurs_nr="B1", ist_zusatzmodul=True, datum=date(2026, 9, 28), startzeit="08:00", endzeit="10:00"),
+    ]
+    main_rows = [
+        make_module(modulname="MSc Kurs", kurs_nr="M1", ist_zusatzmodul=False, datum=date(2026, 9, 7), startzeit="09:00", endzeit="11:00"),
+        make_module(modulname="MSc Kurs", kurs_nr="M1", ist_zusatzmodul=False, datum=date(2026, 9, 14), startzeit="14:00", endzeit="16:00"),
+        make_module(modulname="MSc Kurs", kurs_nr="M1", ist_zusatzmodul=False, datum=date(2026, 9, 28), startzeit="09:00", endzeit="11:00"),
+    ]
+    results = find_critical_first_session_conflicts(zusatz_rows + main_rows, _family_key)
+    assert results == []
+
+
+def test_pure_master_master_conflict_never_flagged_even_on_first_session():
+    a = make_module(modulname="MSc Kurs A", kurs_nr="M1", ist_zusatzmodul=False, datum=date(2026, 9, 14), startzeit="08:00", endzeit="10:00")
+    b = make_module(modulname="MSc Kurs B", kurs_nr="M2", ist_zusatzmodul=False, datum=date(2026, 9, 14), startzeit="09:00", endzeit="11:00")
+    assert find_critical_first_session_conflicts([a, b], _family_key) == []
+
+
+def test_exam_rows_are_skipped_when_counting_session_position():
+    # An exam row dated BEFORE the two real teaching sessions must not push
+    # the real 1st/2nd session out of the protected window.
+    exam = make_module(modulname="BSc Kurs", kurs_nr="B1", ist_zusatzmodul=True, ist_pruefung=True, datum=date(2026, 9, 7), startzeit="08:00", endzeit="10:00")
+    real_first = make_module(modulname="BSc Kurs", kurs_nr="B1", ist_zusatzmodul=True, datum=date(2026, 9, 14), startzeit="08:00", endzeit="10:00")
+    real_second = make_module(modulname="BSc Kurs", kurs_nr="B1", ist_zusatzmodul=True, datum=date(2026, 9, 21), startzeit="08:00", endzeit="10:00")
+    main_module = make_module(modulname="MSc Kurs", kurs_nr="M1", ist_zusatzmodul=False, datum=date(2026, 9, 21), startzeit="09:00", endzeit="11:00")
+    results = find_critical_first_session_conflicts([exam, real_first, real_second, main_module], _family_key)
+    assert len(results) == 1
+    zusatz_position = results[0]["left_session_position"] if results[0]["left"].ist_zusatzmodul else results[0]["right_session_position"]
+    assert zusatz_position == 2  # real_second is the course's 2nd non-exam session, not 3rd
+
+
+def test_undated_row_is_never_treated_as_protected():
+    undated = make_module(modulname="BSc Kurs", kurs_nr="B1", ist_zusatzmodul=True, datum=None, wochentag="montag", startzeit="08:00", endzeit="10:00")
+    main_module = make_module(modulname="MSc Kurs", kurs_nr="M1", ist_zusatzmodul=False, datum=None, wochentag="montag", startzeit="09:00", endzeit="11:00")
+    assert find_critical_first_session_conflicts([undated, main_module], _family_key) == []
+
+
+def test_bachelor_bachelor_conflict_on_first_session_is_flagged():
+    # Two Zusatzmodule colliding with each other (no Master module involved
+    # at all) still counts - the risk (missed intro info) is the same.
+    a = make_module(modulname="BSc Kurs A", kurs_nr="B1", ist_zusatzmodul=True, datum=date(2026, 9, 14), startzeit="08:00", endzeit="10:00")
+    b = make_module(modulname="BSc Kurs B", kurs_nr="B2", ist_zusatzmodul=True, datum=date(2026, 9, 14), startzeit="09:00", endzeit="11:00")
+    results = find_critical_first_session_conflicts([a, b], _family_key)
+    assert len(results) == 1
+    assert results[0]["left_session_position"] == 1
+    assert results[0]["right_session_position"] == 1

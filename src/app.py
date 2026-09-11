@@ -83,7 +83,7 @@ if not logger.handlers:
 # st.stop() later in main(). MODULES_AVAILABLE is checked there.
 try:
     from data_loader import load_schedule_from_dataframe, DataLoaderError
-    from scheduler import find_time_conflicts
+    from scheduler import find_time_conflicts, find_critical_first_session_conflicts
     from models import ZHAWModule
     # NEU: Export-Funktionen hier in den Try-Block aufnehmen
     from export import prepare_timetable_for_export, generate_excel_download, generate_ics_download
@@ -4284,6 +4284,34 @@ def render_dashboard(modules: List) -> None:
                 column_config=_attendance_column_config(),
             )
 
+    # Passerelle-specific, only shown when a Zusatzmodule (Bachelor) upload
+    # exists at all - see find_critical_first_session_conflicts()'s
+    # docstring in scheduler.py for why a collision on a course's 1st/2nd
+    # session is much higher-stakes than a later one. Deliberately a short
+    # hint here, NOT the full detail table (unlike dash-attendance above) -
+    # the student-approved design for this feature keeps the full
+    # breakdown exclusively in the Konflikte tab.
+    if zusatz_uploaded:
+        critical_first_sessions = find_critical_first_session_conflicts(modules, _module_course_family_key)
+        with card("dash-passerelle-critical", "🎓", t("dashboard.section.passerelle_critical")):
+            st.caption(t("dashboard.passerelle_critical.caption"))
+            if not critical_first_sessions:
+                st.success(t("dashboard.passerelle_critical.none"))
+            else:
+                st.error(t("dashboard.passerelle_critical.found", count=len(critical_first_sessions)))
+                st.caption(t("dashboard.passerelle_critical.see_conflicts_tab"))
+            # Kept short above (dashboard = glanceable, per this app's own
+            # "does MY current selection have a problem" principle - see the
+            # comment on the dash-absence card above) - the full rationale
+            # and actionable tips live in this collapsed expander instead of
+            # bloating the always-visible card. Same shared text as the
+            # Konflikte-tab card below (passerelle_critical.* keys, not
+            # dashboard.*/conflicts.* scoped) - one source of truth so the
+            # explanation can never drift between the two places it appears.
+            with st.expander(t("passerelle_critical.why_expander_title"), expanded=False):
+                st.markdown(t("passerelle_critical.why_body"))
+                st.markdown(t("passerelle_critical.tips_body"))
+
     overlap_summary = _calculate_module_overlap_summary(modules)
     exam_df = _calculate_exam_feasibility(modules)
 
@@ -4705,6 +4733,85 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
             )
             st.markdown(t("conflicts.interpretation_title"))
             st.caption(t("conflicts.interpretation_text"))
+
+    # Passerelle-specific detail table - only shown when a Zusatzmodule
+    # (Bachelor) upload exists at all. Computed independently of `conflicts`
+    # above (find_critical_first_session_conflicts() runs its own
+    # find_time_conflicts() internally over `selected_modules`), so this
+    # card doesn't need to sit inside the `if conflicts:` block.
+    if bool(st.session_state.get("processed_modules_zusatz")):
+        critical_first_sessions = find_critical_first_session_conflicts(selected_modules, _module_course_family_key)
+        with card("conflicts-passerelle-critical", "🎓", t("conflicts.passerelle_critical_title").strip("*")):
+            st.caption(t("conflicts.passerelle_critical_caption"))
+            if not critical_first_sessions:
+                st.success(t("conflicts.passerelle_critical_none"))
+            else:
+                critical_rows = []
+                for entry in critical_first_sessions:
+                    left, right = entry["left"], entry["right"]
+                    module_1_label = _module_label(left)
+                    if getattr(left, "ist_zusatzmodul", False):
+                        module_1_label = f"🎓 {module_1_label}"
+                    module_2_label = _module_label(right)
+                    if getattr(right, "ist_zusatzmodul", False):
+                        module_2_label = f"🎓 {module_2_label}"
+
+                    session_notes = []
+                    if entry["left_session_position"] is not None:
+                        session_notes.append(
+                            t(
+                                "conflicts.passerelle_critical.session_note",
+                                position=entry["left_session_position"],
+                                module=_module_label(left),
+                            )
+                        )
+                    if entry["right_session_position"] is not None:
+                        session_notes.append(
+                            t(
+                                "conflicts.passerelle_critical.session_note",
+                                position=entry["right_session_position"],
+                                module=_module_label(right),
+                            )
+                        )
+
+                    critical_rows.append(
+                        {
+                            c("date"): _conflict_date_label(left),
+                            c("weekday"): _weekday_label(left),
+                            c("module_1"): module_1_label,
+                            c("time_1"): f"{left.startzeit.strftime('%H:%M')} - {left.endzeit.strftime('%H:%M')}",
+                            c("module_2"): module_2_label,
+                            c("time_2"): f"{right.startzeit.strftime('%H:%M')} - {right.endzeit.strftime('%H:%M')}",
+                            # "; " rather than " / " to join multiple notes -
+                            # _module_label() itself already renders as
+                            # "<Modul-Nr> / <Kurs-Nr> - <Titel>", so a " / "
+                            # separator here would visually blend into that
+                            # and make it look like one run-on label instead
+                            # of two distinct notes when both sides are
+                            # protected.
+                            c("affected_early_session"): "; ".join(session_notes),
+                        }
+                    )
+
+                critical_df = pd.DataFrame(critical_rows).sort_values([c("date"), c("weekday")], ascending=[True, True])
+                # Every row here is "critical" by definition (that's what
+                # find_critical_first_session_conflicts() already filtered
+                # for) - a flat danger tint, no per-row tone logic needed
+                # (unlike _style_attendance_rows/_style_risk_rows elsewhere).
+                st.dataframe(
+                    critical_df.style.apply(lambda row: [f"background-color: {_ROW_TONE_COLORS['danger']}"] * len(row), axis=1),
+                    hide_index=True,
+                    width="stretch",
+                )
+
+            # Shown regardless of whether a conflict was actually found (0
+            # critical conflicts today doesn't mean the topic stops being
+            # relevant for a Passerelle student's later course choices) -
+            # same shared passerelle_critical.* text as the Dashboard's
+            # expander above, single source of truth.
+            with st.expander(t("passerelle_critical.why_expander_title"), expanded=False):
+                st.markdown(t("passerelle_critical.why_body"))
+                st.markdown(t("passerelle_critical.tips_body"))
 
     with card("conflicts-absence", "🧭", t("conflicts.absence_title").strip("*")):
         # Attendance status is driven by time conflicts AND absence rules
