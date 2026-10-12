@@ -666,6 +666,8 @@ def init_session_state() -> None:
         st.session_state.filters_initialized = False
     if 'selected_course_bases' not in st.session_state:
         st.session_state.selected_course_bases = []
+    if 'selected_row_ids' not in st.session_state:
+        st.session_state.selected_row_ids = []
     if 'ui_language' not in st.session_state:
         st.session_state.ui_language = "de"
     if 'ui_theme' not in st.session_state:
@@ -965,6 +967,7 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
             _recompute_combined_modules()
             st.session_state.selected_modules = []
             st.session_state.selected_course_bases = []
+            st.session_state.selected_row_ids = []
             st.toast(t("upload.success"), icon="✅")
             _warn_if_dates_missing(st.session_state[modules_key])
             return
@@ -1000,6 +1003,7 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
                 _recompute_combined_modules()
                 st.session_state.selected_modules = []
                 st.session_state.selected_course_bases = []
+                st.session_state.selected_row_ids = []
                 st.toast(t("upload.success_sheet", sheet_name=sheet_name), icon="✅")
                 _warn_if_dates_missing(st.session_state[modules_key])
                 return
@@ -3728,10 +3732,26 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         # a checkbox table, so the student first picks *which modules*
         # they're taking before drilling into per-component variant choices
         # further below.
+        #
+        # Two groupings are built here on purpose: `grouped_modules` (table
+        # rows, filtered subset only - what the student currently sees and
+        # can click) and `grouped_modules_all` (every module, unfiltered -
+        # used below to resolve the FULL set of rows for an already-selected
+        # module even while a filter currently hides it). Without the
+        # second one, narrowing a filter (typing a search term, ticking a
+        # weekday) would silently drop any previously selected module that
+        # the new filter no longer shows, because the selection used to be
+        # rebuilt purely from the filtered table every rerun - a real,
+        # reported bug ("Filterwahl führt zur Löschung").
         grouped_modules: dict[str, list[Any]] = {}
         for _, module in filtered_with_ids:
             key = _module_group_key(module)
             grouped_modules.setdefault(key, []).append(module)
+
+        grouped_modules_all: dict[str, list[Any]] = {}
+        for module in all_modules:
+            key = _module_group_key(module)
+            grouped_modules_all.setdefault(key, []).append(module)
 
         module_version, module_forced_selection = _select_all_controls("module_selector", sorted(grouped_modules.keys()))
 
@@ -3788,7 +3808,14 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             key=f"module_group_selector_editor_{module_version}",
         )
 
-        selected_keys = set(edited_module_df.loc[edited_module_df[c("select")] == True, c("module_key")].tolist())
+        # Merge rather than overwrite: a key that isn't currently visible in
+        # this table (filtered out) keeps whatever selection state it had
+        # before - only the keys actually shown/editable just now are
+        # authoritative from `edited_module_df`. See the comment at
+        # `grouped_modules_all` above for why this matters.
+        checked_now = set(edited_module_df.loc[edited_module_df[c("select")] == True, c("module_key")].tolist())
+        selected_keys_prev_all = set(st.session_state.get("selected_course_bases", []))
+        selected_keys = (selected_keys_prev_all - set(grouped_modules.keys())) | checked_now
         st.session_state.selected_course_bases = sorted(selected_keys)
 
         selected_modules = []
@@ -3820,7 +3847,12 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         #     so a selectbox is rendered and nothing is added until the
         #     student actively picks one ("not selected" leaves it as an
         #     open_choices count, surfaced in the step-5 status table below).
-        for key, items in sorted(grouped_modules.items(), key=lambda pair: _module_group_display(pair[0], pair[1]).lower()):
+        # Resolved from `grouped_modules_all` (every module, not the
+        # currently filtered/visible subset) so a module that's selected but
+        # momentarily hidden by a filter still gets its full set of rows
+        # resolved into `selected_modules` below - see the comment at
+        # `grouped_modules_all`'s definition above.
+        for key, items in sorted(grouped_modules_all.items(), key=lambda pair: _module_group_display(pair[0], pair[1]).lower()):
             if key not in selected_keys:
                 continue
 
@@ -3948,15 +3980,18 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         # conflict definition the Conflicts tab uses) and back-annotate each
         # module's status row with how many of ITS OWN selected rows
         # participate in at least one conflict. matching_key re-derives
-        # which grouped_modules key a status row belongs to by comparing
+        # which grouped_modules_all key a status row belongs to by comparing
         # display labels (module_status_rows only stored the display label,
         # not the key itself, when it was built above) so we can look up
-        # that module's selected rows in selected_by_module_key.
+        # that module's selected rows in selected_by_module_key. Uses
+        # `grouped_modules_all`, not the filtered `grouped_modules`, since a
+        # selected-but-currently-filtered-out module still has a status row
+        # here (see the comment at `grouped_modules_all`'s definition).
         selected_conflicts = find_time_conflicts(selected_modules)
         conflict_module_ids = {id(left) for left, _ in selected_conflicts} | {id(right) for _, right in selected_conflicts}
         for row in module_status_rows:
             matching_key = None
-            for key, items in grouped_modules.items():
+            for key, items in grouped_modules_all.items():
                 if _module_group_display(key, items) == row[c("module_group")]:
                     matching_key = key
                     break
@@ -4010,11 +4045,22 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         # nuance only exists in "module" mode; this mode is meant for
         # students who just want "give me everything under this course
         # name" without picking between parallel group offerings.
+        # Same "two groupings" split as "module" mode above: `grouped` is the
+        # filtered/visible subset shown in the table, `grouped_all` is every
+        # module, used below to resolve the full row set for an
+        # already-selected base course even while a filter currently hides
+        # it - see the comment at "module" mode's `grouped_modules_all`.
         grouped: dict[str, list[tuple[int, Any, str, bool]]] = {}
         for module_id, module in filtered_with_ids:
             base, variant, name_exam_flag = _split_course_variant(module.modulname)
             is_exam = bool(getattr(module, "ist_pruefung", False) or name_exam_flag)
             grouped.setdefault(base, []).append((module_id, module, variant, is_exam))
+
+        grouped_all: dict[str, list[tuple[int, Any, str, bool]]] = {}
+        for module_id, module in modules_with_id:
+            base, variant, name_exam_flag = _split_course_variant(module.modulname)
+            is_exam = bool(getattr(module, "ist_pruefung", False) or name_exam_flag)
+            grouped_all.setdefault(base, []).append((module_id, module, variant, is_exam))
 
         course_version, course_forced_selection = _select_all_controls("course_selector", sorted(grouped.keys()))
 
@@ -4057,11 +4103,17 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         # No 🎓 prefix here anymore (see the "module" mode table's identical
         # comment) - `base_course` is already the plain `base` key, so it
         # round-trips through the table unchanged.
-        selected_bases = set(edited_groups.loc[edited_groups[c("select")] == True, c("base_course")].tolist())
+        #
+        # Merge rather than overwrite (see "module" mode's identical fix):
+        # a base course not currently visible in this table keeps whatever
+        # selection state it had before.
+        checked_now = set(edited_groups.loc[edited_groups[c("select")] == True, c("base_course")].tolist())
+        selected_bases_prev_all = set(st.session_state.get("selected_course_bases", []))
+        selected_bases = (selected_bases_prev_all - set(grouped.keys())) | checked_now
         st.session_state.selected_course_bases = sorted(selected_bases)
 
         selected_modules = []
-        for base, items in grouped.items():
+        for base, items in grouped_all.items():
             if base not in selected_bases:
                 continue
             for _, module, _, is_exam in items:
@@ -4092,6 +4144,12 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         ]
         row_version, row_forced_selection = _select_all_controls("row_selector", included_ids)
 
+        # Persisted across reruns/filter changes under its own key (position-
+        # based `module_id`, stable for the lifetime of `all_modules` - see
+        # "module"/"course" mode's identical `grouped_modules_all`/`grouped_all`
+        # comments above for why a filtered-out selection must not be lost).
+        selected_row_ids_prev_all = set(st.session_state.get("selected_row_ids", []))
+
         rows = []
         excluded_exam_rows = 0
         for module_id, module in filtered_with_ids:
@@ -4102,7 +4160,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             if row_forced_selection is not None:
                 default_selected = module_id in row_forced_selection
             else:
-                default_selected = selected_lookup.get(id(module), False)
+                default_selected = module_id in selected_row_ids_prev_all
             rows.append(_module_to_row(module, module_id, default_selected))
 
         if excluded_exam_rows:
@@ -4148,7 +4206,13 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             key=f"course_selector_editor_{row_version}",
         )
 
-        selected_ids = set(edited.loc[edited[c("select")] == True, c("id")].tolist())
+        # Merge rather than overwrite (see "module"/"course" mode's identical
+        # fix above): a row not currently visible in this table keeps
+        # whatever selection state it had before.
+        checked_now = set(edited.loc[edited[c("select")] == True, c("id")].tolist())
+        visible_ids = set(idx for idx, _ in filtered_with_ids)
+        selected_ids = (selected_row_ids_prev_all - visible_ids) | checked_now
+        st.session_state.selected_row_ids = sorted(selected_ids)
         selected_modules = [m for idx, m in modules_with_id if idx in selected_ids]
 
     st.info(t("guided.current_selection", selected=len(selected_modules), filtered=len(filtered)))
@@ -4276,6 +4340,7 @@ def render_sidebar() -> None:
                 st.session_state.conflicts = []
                 st.session_state.selected_modules = []
                 st.session_state.selected_course_bases = []
+                st.session_state.selected_row_ids = []
                 # Force the Zusatzmodule uploader widget below to remount
                 # under a fresh key THIS SAME rerun (see
                 # init_session_state()'s docstring for zusatz_uploader_
@@ -4314,6 +4379,7 @@ def render_sidebar() -> None:
                     _recompute_combined_modules()
                     st.session_state.selected_modules = []
                     st.session_state.selected_course_bases = []
+                    st.session_state.selected_row_ids = []
 
         if st.session_state.processed_modules:
             st.divider()
