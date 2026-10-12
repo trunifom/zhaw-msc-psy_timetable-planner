@@ -2352,6 +2352,7 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
                 c("weekday"): _weekday_label(module),
                 c("type"): module.modultyp,
                 c("time"): f"{module.startzeit.strftime('%H:%M')} - {module.endzeit.strftime('%H:%M')}",
+                "_is_exam": bool(getattr(module, "ist_pruefung", False)),
             }
         )
 
@@ -2367,6 +2368,7 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
         color_discrete_sequence=color_sequence,
         hover_name=c("module"),
         hover_data={c("type"): True, c("time"): True, c("start_datetime"): "|%d.%m.%Y"},
+        custom_data=["_is_exam"],
         category_orders={c("weekday"): _weekday_labels_in_order()},
     )
     # Bigger, semi-transparent markers: big enough to stay visible when many
@@ -2374,7 +2376,8 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
     # semi-transparent so an actual cluster of overlapping dates still
     # reads as "several events here" (darker) rather than one dot silently
     # hiding the others underneath it.
-    fig.update_traces(marker=dict(size=14, opacity=0.85))
+    fig.update_traces(marker=dict(size=14, opacity=0.85, line=dict(width=0)))
+    _mark_exam_sessions(fig)
     fig.update_yaxes(autorange="reversed")
     fig.update_layout(
         height=560,
@@ -2395,6 +2398,31 @@ def _is_pruefungseinsicht(module: Any) -> bool:
     exam-variant suffix - there is no dedicated boolean field for this in
     ZHAWModule, it's a real recurring title pattern in the ZHAW catalogs."""
     return bool(_PRUEFUNGSEINSICHT_PATTERN.search(str(getattr(module, "modulname", "") or "")))
+
+
+_EXAM_MARKER_COLOR = "#E62154"  # ZHAW Koralle - same red used across this app's CHART_PALETTES
+
+
+def _mark_exam_sessions(fig) -> None:
+    """
+    Give exam sessions ("ist_pruefung") a distinctly thicker red marker
+    outline on a px.scatter figure built with `custom_data=["_is_exam"]`,
+    so a student can spot an exam date at a glance in any per-session chart
+    without it changing the course's own fill color (which still encodes
+    *which course* the session belongs to). Applied per-trace since Plotly
+    Express splits one trace per color group, and marker outline color/
+    width can be set as a per-point array within each trace.
+    """
+    for trace in fig.data:
+        if trace.customdata is None:
+            continue
+        is_exam_flags = [bool(row[0]) for row in trace.customdata]
+        if not any(is_exam_flags):
+            continue
+        base_line_color = trace.marker.line.color or "rgba(255,255,255,0.6)"
+        base_line_width = trace.marker.line.width or 1
+        trace.marker.line.color = [_EXAM_MARKER_COLOR if is_exam else base_line_color for is_exam in is_exam_flags]
+        trace.marker.line.width = [3 if is_exam else base_line_width for is_exam in is_exam_flags]
 
 
 def _module_short_code(module: Any) -> str:
@@ -2482,6 +2510,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
                 c("date"): datum_value.strftime("%d.%m.%Y"),
                 c("time"): f"{module.startzeit.strftime('%H:%M')} - {module.endzeit.strftime('%H:%M')}",
                 c("room"): module.raum,
+                "_is_exam": bool(getattr(module, "ist_pruefung", False)),
             }
         )
 
@@ -2510,6 +2539,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         text="_short_code",
         hover_name=c("module"),
         hover_data={c("date"): True, c("time"): True, c("room"): True, "_color_key": False, "_short_code": False},
+        custom_data=["_is_exam"],
         category_orders={c("weekday"): present_weekdays, c("week"): ordered_weeks},
     )
     fig.update_traces(
@@ -2517,6 +2547,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         textposition="middle center",
         textfont=dict(size=10, color="white"),
     )
+    _mark_exam_sessions(fig)
     fig.update_layout(
         height=max(420, 42 * len(ordered_weeks) + 120),
         margin=dict(l=10, r=10, t=30, b=10),
