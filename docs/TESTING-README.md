@@ -462,6 +462,49 @@ bug only by driving the app live, not by code review:
   Re-verified live afterwards: label correctly reads plain "🔍 Filter"
   immediately after clicking reset, in the same script run.
 
+The very next piece of that same round (filter chips - one small,
+individually removable "chip" per active Schritt-2 filter field, e.g.
+"Suche Modul-Nr: ZAS1 ✕") needed a second, DIFFERENT fix for a DIFFERENT
+reason than the reset-button one above, which is worth spelling out since
+it's easy to over-generalize the first fix's lesson incorrectly:
+
+- A first version put `_render_active_filter_chips()` in the same early,
+  pre-card-exit position as the "🧹 Alle Filter zurücksetzen" button,
+  on the assumption that the same "runs before what it affects" reasoning
+  would apply. It does NOT apply here, and the difference matters: the
+  reset button affects a SEPARATE, later widget (the expander's label) -
+  but a chip's own "✕" button needs to affect its OWN already-rendered
+  label. Streamlit must draw a button (with SOME label) before it can
+  report back whether that exact button was clicked - nothing can retro-
+  actively "un-draw" it within the same script pass once that's known.
+  Confirmed live with Playwright: clicking a chip's "✕" DID correctly
+  clear that filter - the match count and table below it updated
+  correctly in that exact same run - but the clicked chip's OWN button
+  stayed on screen with its stale pre-click label (e.g. still "Suche
+  Modul-Nr: ZAS1 ✕") until the next, unrelated interaction. Cosmetically
+  wrong and confusing (looks like the removal silently failed), even
+  though the actual filtering was already correct underneath.
+- Fixed by moving `_render_active_filter_chips()`'s call site to run
+  AFTER `guided_step2_card.__exit__()` (the same safe position
+  `_render_selected_items_removal()` already uses) and adding an explicit
+  `st.rerun()` to the chip's own button handler, which forces the clean
+  second pass that actually drops the now-irrelevant chip. Also added at
+  the equivalent spot in the "no matches" early-return branch, so the
+  chips (and their "✕" buttons) are available right next to that warning
+  too - exactly the state where a chip is most likely to be the thing a
+  student wants to remove.
+- The underlying principle connecting both fixes in this round: WHERE a
+  piece of Schritt-2 filter UI needs to sit is determined by what it
+  needs to affect and when - something that only affects LATER values
+  computed in the same run can safely sit early and skip `st.rerun()`
+  (the reset button, and the original filter-persistence fix); something
+  that needs to affect its OWN rendering, or render AFTER values that are
+  only known once the whole filtered table has been computed, needs to
+  sit after the card has cleanly exited and use `st.rerun()` (chip removal,
+  item removal). Getting this placement decision right needs an actual
+  live Playwright repro each time, not just a plausible-sounding analogy
+  to the last fix - demonstrated twice now within the same work session.
+
 ## Adding new tests
 
 - Match the file that already covers the module you're changing (see the

@@ -3468,6 +3468,121 @@ def _reset_all_filters() -> None:
     st.session_state.pop(_RADIO_FILTER_KEY, None)
 
 
+def _filter_field_label(key: str) -> str:
+    """Human-readable label for one filter's session_state key, shared by
+    the active-filter "chip" and anywhere else a filter needs to name
+    itself generically - reuses each widget's own existing label text (see
+    the chip-UX research note at _render_active_filter_chips()'s docstring
+    about always naming the filter, not just showing its value, so two
+    differently-labelled filters are never confused for each other)."""
+    return {
+        "filter_modul_nr": t("guided.search.modul_nr"),
+        "filter_kurs_nr": t("guided.search.kurs_nr"),
+        "filter_base_search": t("guided.search.base"),
+        "filter_module_types": t("guided.filter.types"),
+        "filter_weekdays": t("guided.filter.weekdays"),
+        "filter_lecturers": t("guided.filter.lecturers"),
+        _TEXT_FILTER_KEY: t("guided.search.text"),
+        _RADIO_FILTER_KEY: t("guided.filter.zusatzmodule"),
+    }[key]
+
+
+def _active_filter_chips() -> list[tuple[str, str, str]]:
+    """
+    Build one "chip" per currently active filter FIELD (not per individual
+    value inside a multiselect - Streamlit's own multiselect widgets
+    already render each of their own selected values as a small removable
+    chip, see the module-level comment at _render_active_filter_chips()),
+    as `(state_key, field_label, display_value)` tuples: e.g.
+    `("filter_weekdays", "Nach Wochentag filtern", "Montag, Dienstag")`.
+
+    Every multi-value filter's several values are joined into one string
+    for its one chip - showing one chip per VALUE instead (as e.g. an
+    e-commerce filter sidebar might) would need Streamlit's own flex-
+    wrapping layout, which `st.columns` doesn't provide; one chip per
+    FIELD is both layout-friendly and still answers the two questions chip
+    UX is meant to answer at a glance: "is this filter active" and "can I
+    tell which one without reading its label closely" (yes - the field
+    name is always shown, see `_filter_field_label()`, following the
+    established UX guidance that a chip must show its filter's title, not
+    just its value, so two similar-looking filters are never confused).
+    """
+    chips: list[tuple[str, str, str]] = []
+    for key in _MULTI_VALUE_FILTER_KEYS:
+        values = st.session_state.get(key) or []
+        if values:
+            chips.append((key, _filter_field_label(key), ", ".join(values)))
+
+    search_value = str(st.session_state.get(_TEXT_FILTER_KEY, "")).strip()
+    if search_value:
+        chips.append((_TEXT_FILTER_KEY, _filter_field_label(_TEXT_FILTER_KEY), search_value))
+
+    zusatz_value = st.session_state.get(_RADIO_FILTER_KEY, t("guided.filter.zusatzmodule_all"))
+    if zusatz_value != t("guided.filter.zusatzmodule_all"):
+        chips.append((_RADIO_FILTER_KEY, _filter_field_label(_RADIO_FILTER_KEY), zusatz_value))
+
+    return chips
+
+
+def _render_active_filter_chips() -> None:
+    """
+    Render one small, individually removable "chip" per currently active
+    Schritt-2 filter field (see _active_filter_chips()) - lets a student
+    see, and clear, exactly which filters are narrowing the course list
+    without opening the "🔍 Filter" expander at all. Common pattern in
+    faceted-search UIs (filter chips/"applied filters" row) specifically
+    recommended so filters stay visible and individually removable even
+    once the filter controls themselves are collapsed/out of view - see
+    the chat history's UX research round (Algolia/chip-pattern sources) for
+    the full citation list this follows.
+
+    Called from render_guided_planning() right after `guided_step2_card`
+    has been cleanly exited (same safe spot `_render_selected_items_
+    removal()` already uses) and DOES call `st.rerun()` after removing a
+    chip - this one needed an actual live repro to get right, not just
+    reasoning by analogy:
+
+    A first version lived BEFORE the filter widgets (like the "🧹 Alle
+    Filter zurücksetzen" button) specifically to avoid needing
+    `st.rerun()`, on the theory that "runs before what it affects" would
+    be enough, same as that reset button. It wasn't. Confirmed live with
+    Playwright: clicking a chip's own "✕" DID correctly clear that
+    filter - the match count and table below updated correctly in that
+    same run - but the clicked chip's OWN button stayed on screen showing
+    its stale pre-click label (e.g. "Suche Modul-Nr: ZAS1 ✕") until the
+    next unrelated interaction. The reset button avoids this because the
+    thing it affects (the expander's label) is a SEPARATE, later widget -
+    but a chip's "✕" button needs to affect its OWN already-drawn label,
+    and nothing can un-draw a button after Streamlit has already rendered
+    it earlier in the very same script pass that discovers it was
+    clicked. An explicit `st.rerun()` forces the clean second pass that
+    actually drops the now-irrelevant chip. Calling it only AFTER the
+    card has been exited (not from the chips' original, earlier position)
+    is what makes that rerun safe - see _render_selected_items_removal()'s
+    docstring for the full story of what goes wrong otherwise (an
+    abandoned card container, not a keyless-widget issue).
+    """
+    chips = _active_filter_chips()
+    if not chips:
+        return
+
+    st.caption(t("guided.filter.chips_caption"))
+    chips_per_row = 3
+    for row_start in range(0, len(chips), chips_per_row):
+        row = chips[row_start : row_start + chips_per_row]
+        columns = st.columns(len(row))
+        for column, (state_key, field_label, display_value) in zip(columns, row):
+            with column:
+                if st.button(
+                    f"{field_label}: {display_value}  ✕",
+                    key=f"filter_chip_remove_{state_key}",
+                    help=t("guided.filter.chip_remove_help"),
+                    width="stretch",
+                ):
+                    st.session_state.pop(state_key, None)
+                    st.rerun()
+
+
 def _hidden_selected_count(all_modules: List[Any], filtered: List[Any], selection_mode: str) -> int:
     """
     How many of the student's already-selected modules/courses/rows are
@@ -3968,6 +4083,13 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         st.warning(t("guided.no_matches"))
         st.session_state.selected_modules = []
         guided_step2_card.__exit__(None, None, None)
+        # Especially useful in this exact state: zero matches almost always
+        # means one of these chips is the culprit - showing them here (with
+        # their own "✕") right next to the warning lets the student fix it
+        # in one click instead of having to open the expander and scan
+        # eight widgets. See _render_active_filter_chips()'s docstring for
+        # why this card-exited position (not earlier) is required.
+        _render_active_filter_chips()
         return []
 
     selection_mode = st.radio(
@@ -4494,6 +4616,13 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     st.info(t("guided.current_selection", selected=len(selected_modules), filtered=len(filtered)))
     st.session_state.selected_modules = selected_modules
     guided_step2_card.__exit__(None, None, None)
+
+    # Rendered right after the card exits - see _render_active_filter_
+    # chips()'s own docstring for why its "✕" buttons need that (an earlier,
+    # pre-card-exit position looked fine in code review but left a just-
+    # removed chip's own stale label stuck on screen for one extra
+    # interaction, confirmed live).
+    _render_active_filter_chips()
 
     # Called AFTER guided_step2_card.__exit__(), not before - see
     # _render_selected_items_removal()'s own docstring for why: this
