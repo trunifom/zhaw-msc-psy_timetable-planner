@@ -3308,6 +3308,71 @@ def _select_all_controls(state_key: str, all_keys: list) -> tuple[int, list | No
     return st.session_state.get(version_key, 0), forced_selection
 
 
+def _render_selected_items_removal(all_modules: List[Any], selection_mode: str) -> None:
+    """
+    Render the student's current selection as a removable list (one entry
+    per selected module/base-course/session, depending on the active
+    `selection_mode`) with a small "✕" button per item, so deselecting one
+    thing doesn't require scrolling back up into the big selection table to
+    find and uncheck the right row - previously the only feedback below the
+    table was a plain count ("Aktuell ausgewählt: N Termine..."), with no
+    way to remove a single item short of re-finding it above or using
+    "Alle abwählen" (which clears everything).
+
+    Deliberately called AFTER the mode-specific selection tables further up
+    in render_guided_planning() (not before), so the list it shows already
+    reflects whatever that run's table/"Alle auswählen" interaction just
+    wrote to session_state. Because of that placement, a removal click here
+    is the LAST thing to touch selected_course_bases/selected_row_ids in
+    this run - nothing later re-reads it - so an explicit `st.rerun()` is
+    actually needed (unlike this project's usual rule against redundant
+    reruns after a button sets session_state something later in the same
+    run already reads: that rule's precondition doesn't hold here).
+
+    Operates on `all_modules` (not the currently filtered subset) and reads
+    the same persisted selection keys ("selected_course_bases" for
+    module/course mode, "selected_row_ids" for row mode) the mode-specific
+    code below reads - so this list, and what it removes, stays correct
+    regardless of whatever filter is currently narrowing the table.
+    """
+    if selection_mode == t("guided.mode.module"):
+        state_key = "selected_course_bases"
+        groups: dict[str, list[Any]] = {}
+        for module in all_modules:
+            groups.setdefault(_module_group_key(module), []).append(module)
+        label_for = lambda key: _module_group_display(key, groups.get(key, []))  # noqa: E731
+        valid_keys = [k for k in st.session_state.get(state_key, []) if k in groups]
+    elif selection_mode == t("guided.mode.course"):
+        state_key = "selected_course_bases"
+        groups = {}
+        for module in all_modules:
+            base, _, _ = _split_course_variant(module.modulname)
+            groups.setdefault(base, []).append(module)
+        label_for = lambda key: key  # noqa: E731
+        valid_keys = [k for k in st.session_state.get(state_key, []) if k in groups]
+    else:
+        state_key = "selected_row_ids"
+        by_id = dict(enumerate(all_modules))
+        label_for = lambda key: _module_label(by_id[key]) if key in by_id else str(key)  # noqa: E731
+        valid_keys = [idx for idx in st.session_state.get(state_key, []) if idx in by_id]
+
+    if not valid_keys:
+        return
+
+    with st.expander(t("guided.selected_list_expander", count=len(valid_keys)), expanded=False):
+        for key in sorted(valid_keys, key=lambda k: label_for(k).lower()):
+            col_label, col_remove = st.columns([6, 1])
+            col_label.markdown(f"- {label_for(key)}")
+            if col_remove.button(
+                "✕",
+                key=f"remove_selected_{state_key}_{key}",
+                help=t("guided.remove_selection_help"),
+            ):
+                remaining = set(st.session_state.get(state_key, [])) - {key}
+                st.session_state[state_key] = sorted(remaining)
+                st.rerun()
+
+
 def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     """
     Guided, German-first course planning assistant with dynamic questions.
@@ -4216,6 +4281,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         selected_modules = [m for idx, m in modules_with_id if idx in selected_ids]
 
     st.info(t("guided.current_selection", selected=len(selected_modules), filtered=len(filtered)))
+    _render_selected_items_removal(all_modules, selection_mode)
     st.session_state.selected_modules = selected_modules
     guided_step2_card.__exit__(None, None, None)
 
