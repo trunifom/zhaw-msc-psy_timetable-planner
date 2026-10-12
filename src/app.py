@@ -2425,6 +2425,48 @@ def _mark_exam_sessions(fig) -> None:
         trace.marker.line.width = [3 if is_exam else base_line_width for is_exam in is_exam_flags]
 
 
+_CONFLICT_MARKER_COLOR = "#111111"
+
+
+def _mark_conflicted_sessions(fig, conflict_index: int = 1) -> None:
+    """
+    Give a session that time-conflicts with another SELECTED session (see
+    scheduler.find_time_conflicts) a solid black, extra-thick marker
+    outline - two conflicting sessions in `_semester_grid_figure` otherwise
+    land on the exact same grid cell and silently overplot one another with
+    no visual sign that there even are two different courses there. Must
+    run AFTER `_mark_exam_sessions()` (on the same figure) so a
+    double-booked exam still reads as "conflict" (black) rather than
+    quietly losing that higher-priority signal to the red exam outline -
+    reads the existing per-point outline color/width it set as the
+    fallback for non-conflicting points instead of overwriting them.
+    Expects the figure's `custom_data` to include the conflict flag at
+    `conflict_index` (index 1 for `_semester_grid_figure`, which passes
+    `custom_data=["_is_exam", "_is_conflict"]`).
+    """
+
+    def _at(value, i, default):
+        if isinstance(value, (list, tuple)):
+            return value[i]
+        return value if value is not None else default
+
+    for trace in fig.data:
+        if trace.customdata is None:
+            continue
+        is_conflict_flags = [bool(row[conflict_index]) for row in trace.customdata]
+        if not any(is_conflict_flags):
+            continue
+        base_line_color = trace.marker.line.color
+        base_line_width = trace.marker.line.width
+        trace.marker.line.color = [
+            _CONFLICT_MARKER_COLOR if is_conflict else _at(base_line_color, i, "rgba(255,255,255,0.6)")
+            for i, is_conflict in enumerate(is_conflict_flags)
+        ]
+        trace.marker.line.width = [
+            4 if is_conflict else _at(base_line_width, i, 1) for i, is_conflict in enumerate(is_conflict_flags)
+        ]
+
+
 def _module_short_code(module: Any) -> str:
     """Short label for one module tile (e.g. the guided-planning semester
     preview grid): the Modul-Nr when available (e.g. "AS1"), else a short
@@ -2472,9 +2514,20 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
     is applied here (empirically verified: reversing it put the LATEST week
     at the top instead, which is what prompted this fix).
 
+    Conflicting selected sessions (overlapping time, see
+    scheduler.find_time_conflicts) would otherwise silently overplot each
+    other at the exact same grid position with no visual sign that there
+    are actually two different courses there, not one - they get a
+    distinct black dashed outline (`_mark_conflicted_sessions`) instead of
+    the default white one, on top of (not instead of) the red exam
+    outline, so a double-booked exam is still identifiable as both.
+
     Returns (figure_or_None, excluded_undated_count, excluded_pruefungseinsicht_count).
     """
     selected_ids = {id(m) for m in selected_modules}
+    conflicted_ids = {
+        id(m) for pair in find_time_conflicts(selected_modules) for m in pair
+    }
     weekday_order = _weekday_labels_in_order()
 
     rows = []
@@ -2511,6 +2564,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
                 c("time"): f"{module.startzeit.strftime('%H:%M')} - {module.endzeit.strftime('%H:%M')}",
                 c("room"): module.raum,
                 "_is_exam": bool(getattr(module, "ist_pruefung", False)),
+                "_is_conflict": id(module) in conflicted_ids,
             }
         )
 
@@ -2539,7 +2593,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         text="_short_code",
         hover_name=c("module"),
         hover_data={c("date"): True, c("time"): True, c("room"): True, "_color_key": False, "_short_code": False},
-        custom_data=["_is_exam"],
+        custom_data=["_is_exam", "_is_conflict"],
         category_orders={c("weekday"): present_weekdays, c("week"): ordered_weeks},
     )
     fig.update_traces(
@@ -2548,6 +2602,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         textfont=dict(size=10, color="white"),
     )
     _mark_exam_sessions(fig)
+    _mark_conflicted_sessions(fig)
     fig.update_layout(
         height=max(420, 42 * len(ordered_weeks) + 120),
         margin=dict(l=10, r=10, t=30, b=10),
@@ -2574,6 +2629,9 @@ def _render_semester_preview_grid(all_modules: List[Any], selected_modules: List
         return
 
     st.plotly_chart(fig, use_container_width=True)
+    selected_conflicts = find_time_conflicts(selected_modules)
+    if selected_conflicts:
+        st.warning(t("guided.step3_preview_conflict_caption", count=len(selected_conflicts)))
     if excluded_undated:
         st.caption(t("guided.step3_preview_excluded_caption", count=excluded_undated))
     if excluded_pruefungseinsicht:
