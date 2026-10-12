@@ -1544,10 +1544,13 @@ def _style_absence_rows(df: pd.DataFrame, reason_col: str) -> Any:
 
 def _style_source_rows(df: pd.DataFrame, source_col: str) -> Any:
     """
-    Tint rows whose `source_col` cell is non-empty (a Zusatzmodul row - see
+    Tint rows whose `source_col` cell is "BSc" (a Zusatzmodul row - see
     _zusatzmodul_marker()) with the "info" tone, so Passerelle/supplementary
     rows are visually distinguishable from regular Master rows in one
-    glance, not just via that column's text.
+    glance, not just via that column's text. Compares against the actual
+    BSc marker text rather than "cell is non-empty", since the "Quelle"
+    column is always filled now ("BSc"/"MSc" for every row, not blank for
+    the main-list case) - an emptiness check would tint every row.
 
     Only usable on plain `st.dataframe(...)` tables - `st.data_editor(...)`
     (used for the three guided-planning selection tables) does NOT support
@@ -1556,8 +1559,10 @@ def _style_source_rows(df: pd.DataFrame, source_col: str) -> Any:
     blocks in render_guided_planning() and _module_to_row()) as the
     equivalent, data_editor-compatible visual marker.
     """
+    bsc_marker = t("col.source.bsc")
+
     def _row_style(row: pd.Series) -> list[str]:
-        is_zusatzmodul = bool(str(row.get(source_col, "")).strip())
+        is_zusatzmodul = str(row.get(source_col, "")).strip() == bsc_marker
         if is_zusatzmodul:
             return [f"background-color: {_ROW_TONE_COLORS['info']}"] * len(row)
         return [""] * len(row)
@@ -1994,16 +1999,20 @@ def _module_legend_label(module: Any, max_len: int = 28) -> str:
 
 def _zusatzmodul_marker(module: Any) -> str:
     """
-    Text marker for the "Quelle" column shown wherever module rows are
-    tabulated: the Zusatzmodul badge text for a supplementary-list row
-    (see ZHAWModule.ist_zusatzmodul), or "" for a normal main-list row.
-    Deliberately blank (not e.g. "Hauptliste") for the common case, so a
-    student with no Zusatzmodule upload never sees this column add any
-    visual noise - it only ever shows content for the minority who
-    actually uploaded a supplementary list (see
-    docs/planung/KONZEPT-passerelle-zusatzmodule.md section 4.2).
+    Text for the "Quelle" column shown wherever module rows are tabulated:
+    "BSc" for a row that came from the optional Zusatzmodule/Passerelle
+    upload (see ZHAWModule.ist_zusatzmodul), "MSc" for a row from the main
+    upload. Always filled (not blank for the main-list case) - a student
+    with no Zusatzmodule upload only ever sees "MSc" here, which is still
+    unambiguous and consistent, and was explicitly requested over the
+    previous "blank for Master rows" behaviour (that blank cell made it
+    look like the column had simply not been filled in for those rows,
+    and the previous Zusatzmodul-only badge/emoji was reported as
+    confusing - see docs/planung/KONZEPT-passerelle-zusatzmodule.md
+    section 4.2 for the original Zusatzmodule-upload concept this marker
+    is based on).
     """
-    return t("badge.zusatzmodul") if getattr(module, "ist_zusatzmodul", False) else ""
+    return t("col.source.bsc") if getattr(module, "ist_zusatzmodul", False) else t("col.source.msc")
 
 
 def _module_to_ui_row(module: Any) -> dict:
@@ -3736,13 +3745,11 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             last_date = dates[-1].strftime("%Y-%m-%d") if dates else ""
             date_range = f"{first_date} - {last_date}" if first_date and last_date else ""
             label = _module_group_display(key, items)
-            # 🎓-Präfix statt echter Zeilenfarbe: st.data_editor akzeptiert
-            # keine pandas-Styler-Objekte (siehe Kommentar bei
-            # _style_source_rows), daher die gleiche Markierung wie in der
-            # Konfliktanzeige (render_conflict_analysis) - zusätzlich zur
-            # bestehenden Text-Spalte "Quelle".
-            if getattr(items[0], "ist_zusatzmodul", False):
-                label = f"🎓 {label}"
+            # No 🎓 prefix here anymore (used to be the data_editor-compatible
+            # substitute for row coloring, see _style_source_rows) - the
+            # "Quelle" column below is now always filled with an unambiguous
+            # "BSc"/"MSc" value, so a second marker on this column was
+            # reported as confusing/redundant rather than helpful.
             is_selected = (key in module_forced_selection) if module_forced_selection is not None else (key in selected_keys_prev)
             module_rows.append(
                 {
@@ -4022,18 +4029,10 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             date_range = f"{first_date} - {last_date}" if first_date and last_date else ""
             default_selected = (base in course_forced_selection) if course_forced_selection is not None else (base in selected_bases_prev)
 
-            # Same "one group, one source" assumption as the "module" mode
-            # table above (items[0] is representative of the whole group).
-            # 🎓-Präfix statt echter Zeilenfarbe - siehe Kommentar bei der
-            # "module" mode-Tabelle oben (gleicher Grund: data_editor
-            # unterstützt keine Styler-Objekte).
-            base_label = base
-            if getattr(items[0][1], "ist_zusatzmodul", False):
-                base_label = f"🎓 {base}"
             group_rows.append(
                 {
                     c("select"): default_selected,
-                    c("base_course"): base_label,
+                    c("base_course"): base,
                     c("rows"): len(items),
                     c("variants_count"): len(variants),
                     c("exam_dates"): exam_count,
@@ -4055,15 +4054,10 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             key=f"course_group_selector_editor_{course_version}",
         )
 
-        # base_label (possibly 🎓-prefixed) round-trips through the table's
-        # own c("base_course") column, so it must be stripped back to the
-        # plain `base` key here before it's used to look up `grouped` again
-        # below (course_details_expander) or persisted to selected_course_
-        # bases (shared session-state key with "module" mode, which stores
-        # plain, unprefixed keys).
-        selected_bases = {
-            b.removeprefix("🎓 ") for b in edited_groups.loc[edited_groups[c("select")] == True, c("base_course")].tolist()
-        }
+        # No 🎓 prefix here anymore (see the "module" mode table's identical
+        # comment) - `base_course` is already the plain `base` key, so it
+        # round-trips through the table unchanged.
+        selected_bases = set(edited_groups.loc[edited_groups[c("select")] == True, c("base_course")].tolist())
         st.session_state.selected_course_bases = sorted(selected_bases)
 
         selected_modules = []
