@@ -1961,6 +1961,37 @@ def _module_label(module: Any) -> str:
     return base
 
 
+def _truncate_text(text: str, max_len: int = 28) -> str:
+    """Shorten `text` to at most `max_len` characters, replacing the cut-off
+    tail with a single ellipsis character - used wherever a real ZHAW
+    course title (sometimes 60+ characters) would otherwise overflow or
+    clutter a chart legend/axis. Returns the text unchanged (no ellipsis)
+    when it already fits."""
+    text = str(text or "").strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max(0, max_len - 1)].rstrip() + "…"
+
+
+def _module_legend_label(module: Any, max_len: int = 28) -> str:
+    """Short, chart-legend-friendly variant of _module_label(): same
+    "<Modul-Nr/Kurs-Nr> - <title>" shape, but the title portion is
+    truncated to `max_len` characters. Real ZHAW course titles are
+    frequently very long, which made every chart's legend/color-group
+    labels (previously built from the untruncated _module_label()) wide
+    and cluttered. The full, untruncated name remains available everywhere
+    these charts also set `hover_name=`/`hover_data=` from _module_label()
+    - only the on-screen legend/axis text is shortened here."""
+    modul_nr = str(getattr(module, "modul_nr", "") or "").strip()
+    kurs_nr = str(getattr(module, "kurs_nr", "") or "").strip()
+    base = _truncate_text(getattr(module, "modulname", "") or "", max_len)
+    if kurs_nr and kurs_nr != modul_nr:
+        return f"{kurs_nr} - {base}"
+    if modul_nr:
+        return f"{modul_nr} - {base}"
+    return base
+
+
 def _zusatzmodul_marker(module: Any) -> str:
     """
     Text marker for the "Quelle" column shown wherever module rows are
@@ -2338,7 +2369,7 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
     the same chart to answer a different question ("which course is this?"
     vs. "what kind of session is this?") without needing a second chart.
     """
-    color_dimension = c("type") if color_by == "type" else c("module")
+    color_dimension = c("type") if color_by == "type" else "_legend_label"
 
     rows = []
     for module in modules:
@@ -2348,6 +2379,7 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
         rows.append(
             {
                 c("module"): _module_label(module),
+                "_legend_label": _module_legend_label(module),
                 c("start_datetime"): pd.to_datetime(f"{datum_value.isoformat()} {module.startzeit.strftime('%H:%M:%S')}"),
                 c("weekday"): _weekday_label(module),
                 c("type"): module.modultyp,
@@ -2367,7 +2399,7 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
         color=color_dimension,
         color_discrete_sequence=color_sequence,
         hover_name=c("module"),
-        hover_data={c("type"): True, c("time"): True, c("start_datetime"): "|%d.%m.%Y"},
+        hover_data={c("type"): True, c("time"): True, c("start_datetime"): "|%d.%m.%Y", "_legend_label": False},
         custom_data=["_is_exam"],
         category_orders={c("weekday"): _weekday_labels_in_order()},
     )
@@ -2568,7 +2600,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
                 c("weekday"): _weekday_label(module),
                 c("module"): _module_label(module),
                 "_short_code": _module_short_code(module),
-                "_color_key": _module_label(module) if is_selected else _SEMESTER_GRID_UNSELECTED_KEY,
+                "_color_key": _module_legend_label(module) if is_selected else _SEMESTER_GRID_UNSELECTED_KEY,
                 c("date"): datum_value.strftime("%d.%m.%Y"),
                 c("time"): f"{module.startzeit.strftime('%H:%M')} - {module.endzeit.strftime('%H:%M')}",
                 c("room"): module.raum,
@@ -2664,19 +2696,25 @@ def _daily_load_figure(modules: List[Any], color_sequence: list[str] | None = No
         datum_value = getattr(module, "datum", None)
         if datum_value is None:
             continue
-        rows.append({c("date"): datum_value, c("duration_min"): module.duration_minutes, c("module"): _module_label(module)})
+        rows.append(
+            {
+                c("date"): datum_value,
+                c("duration_min"): module.duration_minutes,
+                "_legend_label": _module_legend_label(module),
+            }
+        )
 
     if not rows:
         return None
 
     df = pd.DataFrame(rows)
     if split_by_module:
-        daily = df.groupby([c("date"), c("module")], as_index=False)[c("duration_min")].sum()
+        daily = df.groupby([c("date"), "_legend_label"], as_index=False)[c("duration_min")].sum()
         fig = px.bar(
             daily,
             x=c("date"),
             y=c("duration_min"),
-            color=c("module"),
+            color="_legend_label",
             color_discrete_sequence=color_sequence,
             title=t("chart.daily_load_title"),
         )
@@ -2845,6 +2883,7 @@ def _weekly_timeline_figure(modules: List[Any], color_mode: str = "multi", color
             {
                 c("weekday"): slot["weekday"],
                 c("module"): slot["label"],
+                "_legend_label": _truncate_text(slot["label"]),
                 # 1970-01-01 dummy-date trick: px.timeline() (Plotly's Gantt
                 # chart) requires real datetime values for x_start/x_end, but
                 # this chart only wants to compare times-of-day across
@@ -2880,6 +2919,7 @@ def _weekly_timeline_figure(modules: List[Any], color_mode: str = "multi", color
         # "occurrence" (it's not a real recurring session), no date range.
         overlay_df = overlay_df.copy()
         overlay_df["short_label"] = overlay_df[c("module")]
+        overlay_df["_legend_label"] = overlay_df[c("module")]
         overlay_df["exam"] = False
         overlay_df[c("occurrences")] = 1
         overlay_df[c("period")] = ""
@@ -2901,7 +2941,7 @@ def _weekly_timeline_figure(modules: List[Any], color_mode: str = "multi", color
         theme = THEME_TOKENS.get(st.session_state.get("ui_theme", "light"), THEME_TOKENS["light"])
         resolved_sequence = [theme["accent"]]
     else:
-        color_column = c("module")
+        color_column = "_legend_label"
         resolved_sequence = color_sequence
 
     fig = px.timeline(
@@ -2919,6 +2959,7 @@ def _weekly_timeline_figure(modules: List[Any], color_mode: str = "multi", color
             c("start"): False,
             c("end"): False,
             "short_label": False,
+            "_legend_label": False,
             "exam": False,
             c("occurrences"): True,
             c("period"): True,
