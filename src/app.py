@@ -395,17 +395,59 @@ def _inject_design_system_css() -> None:
            light/dark toggle - paired with dark button text, that reads as
            an unreadable dark-on-dark button in light mode. Restyled with
            the same tokens as inputs/cards so background and text always
-           swap together and stay readable in both themes. */
-        .stButton button, .stDownloadButton button {{
+           swap together and stay readable in both themes.
+           `[data-testid="stBaseButton-secondary"]`/`-primary` is Streamlit's
+           actual rendered <button> regardless of which widget wraps it -
+           added (not just `.stButton button`/`.stDownloadButton button`,
+           which only cover st.button()/st.download_button() specifically)
+           because the file uploader's own "Browse files" button uses the
+           exact same base button component but isn't wrapped in `.stButton`,
+           so it was still falling back to Streamlit's native white-on-light
+           chrome and stayed unreadable in dark mode - reported live by a
+           user ("weiss und Schrift hellgrau, keine Kontraste"). */
+        .stButton button, .stDownloadButton button,
+        [data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-primary"] {{
             background: var(--zp-surface) !important;
             color: var(--zp-text) !important;
             border: 1px solid var(--zp-border) !important;
             font-size: 0.9rem;
         }}
-        .stButton button:hover, .stDownloadButton button:hover {{
+        .stButton button:hover, .stDownloadButton button:hover,
+        [data-testid="stBaseButton-secondary"]:hover, [data-testid="stBaseButton-primary"]:hover {{
             background: var(--zp-surface-hover) !important;
             border-color: var(--zp-accent) !important;
             color: var(--zp-accent) !important;
+        }}
+
+        /* --- Expanders (st.expander) - never themed before this app had one
+           prominent/often-used enough for it to matter (the new Schritt-2
+           "🔍 Filter" section). Unstyled, the header/content both fall back
+           to Streamlit's own native (light-grey) chrome regardless of this
+           app's light/dark toggle, which in dark mode reads as a light
+           block with low-contrast grey text - reported live by a user as
+           unreadable while expanded. Themed with the same tokens as cards/
+           inputs so it blends into the surrounding card instead of standing
+           out as a different, native-styled component. --------------- */
+        [data-testid="stExpander"] {{
+            border: 1px solid var(--zp-border) !important;
+            border-radius: 10px;
+            background: var(--zp-surface) !important;
+        }}
+        [data-testid="stExpander"] summary {{
+            background: var(--zp-surface) !important;
+            color: var(--zp-text) !important;
+        }}
+        [data-testid="stExpander"] summary:hover {{
+            background: var(--zp-surface-hover) !important;
+        }}
+        [data-testid="stExpander"] summary p,
+        [data-testid="stExpander"] summary span,
+        [data-testid="stExpander"] summary [data-testid="stIconMaterial"] {{
+            color: var(--zp-text) !important;
+        }}
+        [data-testid="stExpanderDetails"] {{
+            background: var(--zp-surface) !important;
+            color: var(--zp-text) !important;
         }}
 
         /* --- Metrics --------------------------------------------------- */
