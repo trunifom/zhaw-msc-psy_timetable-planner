@@ -584,6 +584,78 @@ that "Stop" button to disappear before proceeding is the reliable way to
 wait for a Streamlit rerun to actually finish in a Playwright check, not a
 fixed sleep.
 
+## UI polish round: dark-mode contrast + relocating item removal
+
+A 2026-10-12 round addressed four user-reported graphical issues, found
+only by actually looking at the running app in both themes:
+
+1. **Dark mode: the file uploader's "Browse files" button stayed
+   unreadable** (white background, light-grey text) regardless of the
+   theme toggle. Root cause: the existing button-theming CSS rule only
+   targeted `.stButton button`/`.stDownloadButton button` (real
+   `st.button()`/`st.download_button()` widgets) - the file uploader's own
+   "Browse files" button uses the identical underlying base-button
+   component (`data-testid="stBaseButton-secondary"`) but isn't wrapped in
+   `.stButton`, so it fell through to Streamlit's native, theme-
+   independent chrome. Fixed by adding `[data-testid="stBaseButton-
+   secondary"]`/`-primary` directly to that rule - matches the actual
+   rendered button regardless of which widget wraps it.
+2. **Dark mode: the new Schritt-2 "🔍 Filter" expander was unreadable
+   when opened** (light background, light-grey text). Root cause:
+   `st.expander` had never been themed anywhere in this app at all - with
+   only rarely-opened expanders before (chart settings, the old
+   "selected items" list), this went unnoticed, but the new, prominent
+   filter section made it obvious. Fixed with new CSS for
+   `[data-testid="stExpander"]`/its `summary`/`[data-testid=
+   "stExpanderDetails"]`, using the same `--zp-*` tokens as cards/inputs -
+   verified via `getComputedStyle` that the expander's background now
+   exactly matches its surrounding card in both themes, not just
+   "looks close enough" in a screenshot.
+3. **A literal, untranslated i18n key (`guided.filter.expander_label`)
+   was reported showing on screen instead of "🔍 Filter".** Investigated
+   thoroughly but could NOT be reproduced on a freshly started server -
+   the key exists with a non-empty value in all three language blocks,
+   `get_text()`'s fallback chain only ever returns the raw key if it's
+   missing from BOTH the active language AND German, and a live check of
+   the rendered DOM (`<p>🔍 Filter</p>`) confirmed correct rendering.
+   Most likely explanation: a Streamlit dev server process that was still
+   running from before this key was added, serving a stale cached import
+   of `i18n.py` - restarting `streamlit run` (not just refreshing the
+   browser) is the standard fix for that class of issue. No code change
+   made for this one; flagged to the user to confirm after a restart
+   rather than guessing at a fix for a non-reproducible symptom.
+4. **The standalone "📋 Deine aktuelle Auswahl" removal list felt
+   disconnected from the big selection table above it** - reported as
+   "man versteht nicht, wieso man hier Termine entfernen kann". For
+   "module" mode (the recommended default), removal moved to where it's
+   actually contextual: a "✕" button right next to each module's own
+   "{Modul} - Bestandteile" expander in the "Bestandteile je gewähltem
+   Modul" section - `_render_selected_items_removal()` now returns
+   immediately for "module" mode, since this inline button fully replaces
+   it there. "Course" and "row" mode keep the standalone list, since
+   neither has an equivalent per-selected-item breakdown to attach a
+   button to (course mode's "Kursdetails" expander lists ALL currently
+   filtered base courses as a reference, selected or not, not a "your
+   selection" view - a removal button there would sit next to courses
+   that might not even be selected).
+
+   The new inline button needed the exact same "exit the card before
+   `st.rerun()`" treatment as `_render_selected_items_removal()`'s own fix
+   (see further up this file) - it's called from deep inside the
+   per-module loop, still within the open `guided_step2_card`, so its
+   handler explicitly calls `guided_step2_card.__exit__(None, None, None)`
+   before `st.rerun()`. This is the THIRD `st.rerun()` call site added to
+   this file during this work; each one has needed this exact treatment -
+   worth remembering before adding a fourth.
+
+Live Playwright verification for all four: dark-mode screenshots plus
+`getComputedStyle` checks for 1-2; DOM inspection for 3; and for 4,
+confirmed the standalone list no longer renders in "module" mode, all 6
+per-module "✕" buttons are present and clickable, removing one drops the
+selection count correctly (62 → 52 Termine), and the tab-switch-freeze
+regression (now checked after every new `st.rerun()` site in this file)
+did not reoccur.
+
 ## Adding new tests
 
 - Match the file that already covers the module you're changing (see the

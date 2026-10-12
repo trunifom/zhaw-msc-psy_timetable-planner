@@ -3515,15 +3515,26 @@ def _render_selected_items_removal(all_modules: List[Any], selection_mode: str) 
     module/course mode, "selected_row_ids" for row mode) the mode-specific
     code below reads - so this list, and what it removes, stays correct
     regardless of whatever filter is currently narrowing the table.
+
+    Skips "module" mode entirely (see the `if selection_mode ==
+    t("guided.mode.module"): return` below) - reported as confusing on its
+    own: a standalone "📋 Deine aktuelle Auswahl" list with no visible
+    connection to the big selection table above it, so a student had no
+    way to tell WHY a given module ended up removable from here. "Module"
+    mode already has its own, better home for this - a "✕" button right
+    next to EACH module's own "Bestandteile"-expander (see
+    render_guided_planning()'s per-module loop), so removal is always
+    contextual to the exact module it affects. "Course" and "row" mode
+    have no equivalent per-item breakdown section to attach a button to
+    (course mode's "Kursdetails" expander lists ALL currently filtered
+    base courses as a reference, selected or not - not a "your selection"
+    view - so a removal button there would be attached to items that
+    might not even be selected), so they keep using this standalone list.
     """
     if selection_mode == t("guided.mode.module"):
-        state_key = "selected_course_bases"
-        groups: dict[str, list[Any]] = {}
-        for module in all_modules:
-            groups.setdefault(_module_group_key(module), []).append(module)
-        label_for = lambda key: _module_group_display(key, groups.get(key, []))  # noqa: E731
-        valid_keys = [k for k in st.session_state.get(state_key, []) if k in groups]
-    elif selection_mode == t("guided.mode.course"):
+        return
+
+    if selection_mode == t("guided.mode.course"):
         state_key = "selected_course_bases"
         groups = {}
         for module in all_modules:
@@ -4420,7 +4431,33 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             family_rows = []
             ambiguous_parallel_components: list[str] = []
 
-            with st.expander(t("guided.module_components_expander", module=label), expanded=False):
+            # Remove-this-module button sits right next to its own expander
+            # (not in a separate, unrelated "Deine aktuelle Auswahl" list
+            # further down, as an earlier version did) - reported as
+            # confusing precisely because it was disconnected from the
+            # module it would remove. Clicking it must take effect
+            # immediately without the module's own now-stale expander
+            # content rendering below it in the same pass, which needs
+            # `guided_step2_card` cleanly exited before `st.rerun()` - see
+            # _render_selected_items_removal()'s docstring for the full
+            # story of why an `st.rerun()` from inside a still-open,
+            # manually-managed card() corrupts the next render (the exact
+            # bug this reuses the fix for, just triggered from a different,
+            # deeper call site this time).
+            expander_col, remove_col = st.columns([8, 1])
+            with remove_col:
+                st.write("")  # vertical spacer so the button aligns with the expander header, not its own top
+                if st.button(
+                    "✕",
+                    key=f"remove_module_{key}",
+                    help=t("guided.remove_selection_help"),
+                ):
+                    remaining = set(st.session_state.get("selected_course_bases", [])) - {key}
+                    st.session_state.selected_course_bases = sorted(remaining)
+                    guided_step2_card.__exit__(None, None, None)
+                    st.rerun()
+
+            with expander_col, st.expander(t("guided.module_components_expander", module=label), expanded=False):
                 for fam_key, fam_items in sorted(families.items(), key=lambda pair: pair[0]):
                     variants: dict[str, list[Any]] = {}
                     for fam_item in fam_items:
