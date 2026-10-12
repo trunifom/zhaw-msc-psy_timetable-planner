@@ -2469,13 +2469,22 @@ def _mark_conflicted_sessions(fig, conflict_index: int = 1) -> None:
 
 def _module_short_code(module: Any) -> str:
     """Short label for one module tile (e.g. the guided-planning semester
-    preview grid): the Modul-Nr when available (e.g. "AS1"), else a short
-    prefix of the base course title (no variant/group suffix) as a
-    readable fallback - unlike _module_group_key(), which is optimized for
-    uniqueness as a grouping key (and so returns a long "BASIS::..." string
-    when Modul-Nr is missing), this is optimized for fitting inside a small
-    chart tile."""
+    preview grid): the Kurs-Nr when it differs from the Modul-Nr (e.g.
+    "AKP10-1"), else just the Modul-Nr (e.g. "AS1"), else a short prefix of
+    the base course title (no variant/group suffix) as a readable fallback
+    - unlike _module_group_key(), which is optimized for uniqueness as a
+    grouping key (and so returns a long "BASIS::..." string when Modul-Nr
+    is missing), this is optimized for fitting inside a small chart tile.
+
+    Preferring Kurs-Nr over bare Modul-Nr matters because one module can
+    consist of several mandatory course components that are always
+    selected together (e.g. module AKP10 = courses AKP10-1 and AKP10-2) -
+    showing only "AKP10" for both made it impossible to tell which
+    component a given tile/session actually was without hovering."""
     modul_nr = str(getattr(module, "modul_nr", "") or "").strip()
+    kurs_nr = str(getattr(module, "kurs_nr", "") or "").strip()
+    if kurs_nr and kurs_nr != modul_nr:
+        return kurs_nr
     if modul_nr:
         return modul_nr
     base, _, _ = _split_course_variant(module.modulname)
