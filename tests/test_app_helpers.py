@@ -2,7 +2,12 @@
 Tests for the pure, Streamlit-independent helper functions added to/changed
 in src/app.py during the 2026-10-12 UX-feedback round (short chart labels,
 Kurs-Nr-aware tile codes, Pruefungseinsicht/exam/conflict chart markers,
-and the "Quelle" column's BSc/MSc text).
+and the "Quelle" column's BSc/MSc text), plus `_hidden_selected_count()`
+from the same day's follow-up "filter quick wins" round - it does read
+`st.session_state`, but only via `.get(...)`, which works fine outside a
+real Streamlit session (confirmed empirically: it just returns the
+provided default, with a harmless warning, not an exception) - so it's
+tested here too by setting the relevant keys directly before calling it.
 
 `src/app.py` itself is policy-documented as not having automated UI tests
 (see docs/TESTING-README.md "What isn't covered" - manual/Playwright
@@ -286,3 +291,52 @@ def test_semester_grid_figure_marks_real_time_conflict_with_black_outline():
     fig, _, _ = app._semester_grid_figure([a, b], [a, b])
     for trace in fig.data:
         assert trace.marker.line.color == (app._CONFLICT_MARKER_COLOR,)
+
+
+# --- _hidden_selected_count (Schritt-2 filter quick wins) -----------------
+
+@pytest.fixture(autouse=True)
+def _clear_selection_state():
+    """Every _hidden_selected_count test below sets selected_course_bases/
+    selected_row_ids directly - reset both before AND after each test so
+    one test's fixture state can never leak into the next (st.session_state
+    is just a process-wide dict in bare/test mode, not request-scoped)."""
+    for key in ("selected_course_bases", "selected_row_ids"):
+        app.st.session_state.pop(key, None)
+    yield
+    for key in ("selected_course_bases", "selected_row_ids"):
+        app.st.session_state.pop(key, None)
+
+
+def test_hidden_selected_count_module_mode_counts_keys_outside_filtered():
+    visible = make_module(modulname="Sichtbar", modul_nr="VIS1")
+    hidden = make_module(modulname="Versteckt", modul_nr="HID1")
+    app.st.session_state["selected_course_bases"] = ["VIS1", "HID1"]
+    # `filtered` only contains the visible module - HID1's key is selected
+    # but not part of the currently filtered/visible set.
+    count = app._hidden_selected_count([visible, hidden], [visible], app.t("guided.mode.module"))
+    assert count == 1
+
+
+def test_hidden_selected_count_is_zero_when_everything_selected_is_visible():
+    visible = make_module(modulname="Sichtbar", modul_nr="VIS1")
+    app.st.session_state["selected_course_bases"] = ["VIS1"]
+    count = app._hidden_selected_count([visible], [visible], app.t("guided.mode.module"))
+    assert count == 0
+
+
+def test_hidden_selected_count_row_mode_uses_positions_not_identity():
+    a = make_module(modulname="Kurs A")
+    b = make_module(modulname="Kurs B")
+    all_modules = [a, b]
+    # Position 1 (Kurs B) is selected but filtered out (`filtered` only has
+    # Kurs A) - row mode stores POSITIONS in selected_row_ids, not id()s.
+    app.st.session_state["selected_row_ids"] = [1]
+    count = app._hidden_selected_count(all_modules, [a], app.t("guided.mode.row"))
+    assert count == 1
+
+
+def test_hidden_selected_count_no_selection_at_all_is_zero():
+    m = make_module(modulname="Kurs")
+    count = app._hidden_selected_count([m], [], app.t("guided.mode.module"))
+    assert count == 0

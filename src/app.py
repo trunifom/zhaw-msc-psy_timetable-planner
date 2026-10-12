@@ -3397,6 +3397,117 @@ def _render_selected_items_removal(all_modules: List[Any], selection_mode: str) 
                 st.rerun()
 
 
+# Every Schritt-2 filter widget's own session_state key, in the order they
+# appear on screen - the single source of truth for "what counts as an
+# active filter" and "what does resetting all filters mean", used by both
+# _active_filter_count() and _reset_all_filters() below so the two can never
+# drift apart (e.g. a new filter widget added to one but not the other).
+# `filter_zusatzmodule_mode` is a radio (not a multiselect/text_input like
+# the rest) - handled separately in both functions since "active" for it
+# means "not the first/default option", not "non-empty".
+_MULTI_VALUE_FILTER_KEYS = (
+    "filter_modul_nr",
+    "filter_kurs_nr",
+    "filter_base_search",
+    "filter_module_types",
+    "filter_weekdays",
+    "filter_lecturers",
+)
+_TEXT_FILTER_KEY = "filter_search"
+_RADIO_FILTER_KEY = "filter_zusatzmodule_mode"
+
+
+def _active_filter_count() -> int:
+    """
+    How many Schritt-2 filters currently narrow the course list - shown in
+    the filter section's expander label (e.g. "🔍 Filter (3 aktiv)") so a
+    student can tell at a glance whether anything is filtering the table
+    even while the section is collapsed, and used to decide whether to
+    default that expander open or closed (see render_guided_planning()).
+
+    Reads every filter widget's session_state value directly via its own
+    `key=`, WITHOUT calling the widget itself - safe to call before those
+    widgets are (re-)instantiated later in this same script run, since a
+    keyed widget's session_state entry already holds this run's value from
+    the very start (the frontend updates it before the script even starts
+    running) - the same established pattern this file already uses for the
+    sidebar's theme/language toggles (see those comments near the top of
+    this file for the original, more detailed explanation of why this is
+    safe and not one rerun behind).
+    """
+    count = sum(1 for key in _MULTI_VALUE_FILTER_KEYS if st.session_state.get(key))
+    if str(st.session_state.get(_TEXT_FILTER_KEY, "")).strip():
+        count += 1
+    if st.session_state.get(_RADIO_FILTER_KEY, t("guided.filter.zusatzmodule_all")) != t("guided.filter.zusatzmodule_all"):
+        count += 1
+    return count
+
+
+def _reset_all_filters() -> None:
+    """
+    Clear every Schritt-2 filter widget back to its default (empty/"show
+    all") value - the "🧹 Alle Filter zurücksetzen" button's handler.
+
+    Must be called BEFORE the filter widgets themselves are instantiated
+    in the same script run (standard Streamlit "reset a widget" pattern: a
+    widget reads its current value from session_state if its `key` already
+    exists there, so removing the key here - before those widget calls run
+    further down in this same pass - makes them come back empty
+    immediately). Because of that ordering, the button that calls this
+    does NOT also need `st.rerun()`: unlike _render_selected_items_removal
+    (which runs AFTER the tables it affects and so needs an explicit extra
+    rerun to show the change - see that function's docstring for the full
+    story of why), this one runs BEFORE the widgets it affects, so the
+    change is already visible by the time THIS SAME run finishes - the
+    same "one-shot action consumed later in this run" pattern
+    _select_all_controls() uses.
+    """
+    for key in _MULTI_VALUE_FILTER_KEYS:
+        st.session_state.pop(key, None)
+    st.session_state.pop(_TEXT_FILTER_KEY, None)
+    st.session_state.pop(_RADIO_FILTER_KEY, None)
+
+
+def _hidden_selected_count(all_modules: List[Any], filtered: List[Any], selection_mode: str) -> int:
+    """
+    How many of the student's already-selected modules/courses/rows are
+    currently "hidden" by the active filters - present in the persisted
+    selection, but not part of `filtered` (the table as narrowed by this
+    run's filters). Purely a transparency hint for the student (see the
+    caption this feeds in render_guided_planning()): the selection-
+    persistence fix elsewhere in this file already guarantees these hidden
+    selections are NOT lost, but without this hint a student narrowing a
+    filter would have no on-screen sign that some selections simply
+    scrolled out of view rather than disappearing - which is exactly the
+    kind of ambiguity that caused the original "filter deletes my
+    selection" bug report to be filed in the first place.
+
+    `selection_mode` is read from the caller as `st.session_state.get(
+    "selection_mode", ...)` rather than a function argument tied to that
+    widget's return value - this hint is shown BEFORE the mode radio is
+    instantiated further down in render_guided_planning(), so reading the
+    widget's own session_state key directly (see _active_filter_count()'s
+    docstring for why that's safe/up to date) is required, not just
+    convenient.
+    """
+    if selection_mode in (t("guided.mode.module"), t("guided.mode.course")):
+        if selection_mode == t("guided.mode.module"):
+            visible_keys = {_module_group_key(m) for m in filtered}
+        else:
+            visible_keys = {_split_course_variant(m.modulname)[0] for m in filtered}
+        selected_keys = set(st.session_state.get("selected_course_bases", []))
+        return len(selected_keys - visible_keys)
+
+    # "row" mode: selected_row_ids holds POSITIONS in all_modules (see
+    # modules_with_id further down), not object identity directly - map
+    # through all_modules once rather than assuming `filtered` indices.
+    visible_ids = {id(m) for m in filtered}
+    selected_positions = set(st.session_state.get("selected_row_ids", []))
+    return sum(
+        1 for idx, module in enumerate(all_modules) if idx in selected_positions and id(module) not in visible_ids
+    )
+
+
 def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     """
     Guided, German-first course planning assistant with dynamic questions.
@@ -3647,94 +3758,138 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     guided_step2_card = card("guided-step2", "🔍", t("guided.step2_title").strip("*"))
     guided_step2_card.__enter__()
 
-    # Modul-Nr/Kurs-Nr/Basiskurs used to be free-text search boxes matched by
-    # substring - a single typo (e.g. "APK10" instead of "AKP-10") silently
-    # produced zero results with no feedback on why, since the filter has no
-    # way to tell "typo" apart from "genuinely no match". Converted to
-    # st.multiselect, populated only with values that actually exist in the
-    # uploaded data: typing still narrows the dropdown (Streamlit's built-in
-    # autocomplete), but the student can only ever pick a real value, so a
-    # typo is caught immediately (nothing to select) instead of silently
-    # returning an empty table later.
-    modul_nr_options = sorted({str(getattr(m, "modul_nr", "") or "") for m in all_modules if getattr(m, "modul_nr", None)})
-    selected_modul_nrs = st.multiselect(
-        t("guided.search.modul_nr"),
-        options=modul_nr_options,
-        key="filter_modul_nr",
-        placeholder=t("guided.search.modul_nr_placeholder"),
-        help=t("guided.search.modul_nr_help"),
-    )
+    # The filter widgets live inside a collapsible expander (not directly in
+    # the card) for two reasons: (1) eight filter widgets shown permanently,
+    # unconditionally, was reported as overwhelming for a non-technical
+    # first-time user who just wants to browse the full course list: (2) an
+    # expander whose label already shows HOW MANY filters are active, and
+    # whose `expanded=` default is driven by that same count, means a
+    # student arriving with no filters set sees a clean, collapsed section
+    # ("🔍 Filter" ... nothing more), while a student who actually has
+    # filters set (e.g. returning after a rerun triggered by something else
+    # entirely, like checking a course box) always finds it already open -
+    # never surprised by filters silently collapsing out of view. See
+    # _active_filter_count()'s docstring for why reading each widget's
+    # session_state directly here (before the widgets below are
+    # instantiated this same run) is safe and not one rerun behind.
+    active_filter_count = _active_filter_count()
+    if active_filter_count:
+        # Deliberately rendered BEFORE (not inside) the expander below, and
+        # BEFORE `expander_label`/`expanded=` are computed from
+        # `active_filter_count` - a first version of this button lived
+        # INSIDE the expander and reset the filters correctly, but the
+        # expander's own label/open-state had already been computed (and
+        # handed to `st.expander(...)`) earlier in that same script run, so
+        # clicking "reset" left the label stuck on "(1 aktiv)" for one
+        # extra rerun, caught live with Playwright. Resetting the count
+        # variable itself right after calling _reset_all_filters() (not
+        # just the underlying session_state) is what makes the label/
+        # `expanded=` below correct in THIS SAME run - the same "runs
+        # before what it affects, so no `st.rerun()` needed" reasoning as
+        # _reset_all_filters()'s own docstring, just one step earlier.
+        if st.button(t("guided.filter.reset_all"), key="reset_all_filters_btn"):
+            _reset_all_filters()
+            active_filter_count = 0
 
-    kurs_nr_options = sorted({str(getattr(m, "kurs_nr", "") or "") for m in all_modules if getattr(m, "kurs_nr", None)})
-    selected_kurs_nrs = st.multiselect(
-        t("guided.search.kurs_nr"),
-        options=kurs_nr_options,
-        key="filter_kurs_nr",
-        placeholder=t("guided.search.kurs_nr_placeholder"),
-        help=t("guided.search.kurs_nr_help"),
+    expander_label = (
+        t("guided.filter.expander_label_active", count=active_filter_count)
+        if active_filter_count
+        else t("guided.filter.expander_label")
     )
-
-    search_text = st.text_input(
-        t("guided.search.text"),
-        placeholder=t("guided.search.text_placeholder"),
-        key="filter_search",
-        help=t("guided.search.text_help"),
-    ).strip().lower()
-
-    base_name_options = sorted({_split_course_variant(m.modulname)[0] for m in all_modules if m.modulname})
-    selected_base_names = st.multiselect(
-        t("guided.search.base"),
-        options=base_name_options,
-        key="filter_base_search",
-        placeholder=t("guided.search.base_placeholder"),
-        help=t("guided.search.base_help"),
-    )
-
-    module_types = sorted({str(getattr(m, "modultyp", t("common.na"))) for m in all_modules if getattr(m, "modultyp", None)})
-    selected_types = st.multiselect(
-        t("guided.filter.types"),
-        options=module_types,
-        key="filter_module_types",
-    )
-
-    weekdays_present = sorted({_weekday_label(m) for m in all_modules})
-    selected_weekdays = st.multiselect(
-        t("guided.filter.weekdays"),
-        options=weekdays_present,
-        key="filter_weekdays",
-    )
-
-    lecturers = sorted(
-        {
-            str(getattr(m, "dozierende", "N/A"))
-            for m in all_modules
-            if getattr(m, "dozierende", None)
-        }
-    )
-    selected_lecturers = st.multiselect(
-        t("guided.filter.lecturers"),
-        options=lecturers,
-        key="filter_lecturers",
-    )
-
-    # Only shown when a Zusatzmodule upload actually contributed rows
-    # to all_modules (see docs/planung/KONZEPT-passerelle-
-    # zusatzmodule.md section 4.3) - progressive disclosure, so the
-    # large majority of students without a Passerelle background never
-    # see this filter at all.
-    zusatz_filter_mode = t("guided.filter.zusatzmodule_all")
-    if any(getattr(m, "ist_zusatzmodul", False) for m in all_modules):
-        zusatz_filter_mode = st.radio(
-            t("guided.filter.zusatzmodule"),
-            options=[
-                t("guided.filter.zusatzmodule_all"),
-                t("guided.filter.zusatzmodule_only"),
-                t("guided.filter.zusatzmodule_hide"),
-            ],
-            key="filter_zusatzmodule_mode",
-            horizontal=True,
+    with st.expander(expander_label, expanded=active_filter_count > 0):
+        # Modul-Nr/Kurs-Nr/Basiskurs used to be free-text search boxes
+        # matched by substring - a single typo (e.g. "APK10" instead of
+        # "AKP-10") silently produced zero results with no feedback on why,
+        # since the filter has no way to tell "typo" apart from "genuinely
+        # no match". Converted to st.multiselect, populated only with
+        # values that actually exist in the uploaded data: typing still
+        # narrows the dropdown (Streamlit's built-in autocomplete), but the
+        # student can only ever pick a real value, so a typo is caught
+        # immediately (nothing to select) instead of silently returning an
+        # empty table later.
+        modul_nr_options = sorted({str(getattr(m, "modul_nr", "") or "") for m in all_modules if getattr(m, "modul_nr", None)})
+        selected_modul_nrs = st.multiselect(
+            t("guided.search.modul_nr"),
+            options=modul_nr_options,
+            key="filter_modul_nr",
+            placeholder=t("guided.search.modul_nr_placeholder"),
+            help=t("guided.search.modul_nr_help"),
         )
 
+        kurs_nr_options = sorted({str(getattr(m, "kurs_nr", "") or "") for m in all_modules if getattr(m, "kurs_nr", None)})
+        selected_kurs_nrs = st.multiselect(
+            t("guided.search.kurs_nr"),
+            options=kurs_nr_options,
+            key="filter_kurs_nr",
+            placeholder=t("guided.search.kurs_nr_placeholder"),
+            help=t("guided.search.kurs_nr_help"),
+        )
+
+        search_text = st.text_input(
+            t("guided.search.text"),
+            placeholder=t("guided.search.text_placeholder"),
+            key="filter_search",
+            help=t("guided.search.text_help"),
+        ).strip().lower()
+
+        base_name_options = sorted({_split_course_variant(m.modulname)[0] for m in all_modules if m.modulname})
+        selected_base_names = st.multiselect(
+            t("guided.search.base"),
+            options=base_name_options,
+            key="filter_base_search",
+            placeholder=t("guided.search.base_placeholder"),
+            help=t("guided.search.base_help"),
+        )
+
+        module_types = sorted({str(getattr(m, "modultyp", t("common.na"))) for m in all_modules if getattr(m, "modultyp", None)})
+        selected_types = st.multiselect(
+            t("guided.filter.types"),
+            options=module_types,
+            key="filter_module_types",
+        )
+
+        weekdays_present = sorted({_weekday_label(m) for m in all_modules})
+        selected_weekdays = st.multiselect(
+            t("guided.filter.weekdays"),
+            options=weekdays_present,
+            key="filter_weekdays",
+        )
+
+        lecturers = sorted(
+            {
+                str(getattr(m, "dozierende", "N/A"))
+                for m in all_modules
+                if getattr(m, "dozierende", None)
+            }
+        )
+        selected_lecturers = st.multiselect(
+            t("guided.filter.lecturers"),
+            options=lecturers,
+            key="filter_lecturers",
+        )
+
+        # Only shown when a Zusatzmodule upload actually contributed rows
+        # to all_modules (see docs/planung/KONZEPT-passerelle-
+        # zusatzmodule.md section 4.3) - progressive disclosure, so the
+        # large majority of students without a Passerelle background never
+        # see this filter at all.
+        zusatz_filter_mode = t("guided.filter.zusatzmodule_all")
+        if any(getattr(m, "ist_zusatzmodul", False) for m in all_modules):
+            zusatz_filter_mode = st.radio(
+                t("guided.filter.zusatzmodule"),
+                options=[
+                    t("guided.filter.zusatzmodule_all"),
+                    t("guided.filter.zusatzmodule_only"),
+                    t("guided.filter.zusatzmodule_hide"),
+                ],
+                key="filter_zusatzmodule_mode",
+                horizontal=True,
+            )
+
+    # Sorting is a display preference, not a filter - deliberately kept
+    # OUTSIDE the collapsible filter expander above (and out of its active-
+    # filter count/reset), since it's a single harmless control that's
+    # useful to keep always visible rather than hidden behind a click.
     sort_mode = st.selectbox(
         t("guided.sort"),
         options=[t("guided.sort.date"), t("guided.sort.weekday"), t("guided.sort.name")],
@@ -3795,6 +3950,19 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         filtered.sort(key=lambda m: str(m.modulname).lower())
 
     st.caption(t("guided.step2_match_count", count=len(filtered)))
+
+    # Transparency hint: a selection made before narrowing a filter doesn't
+    # disappear (see the selection-persistence fix elsewhere in this file),
+    # but without this hint a student would have no visible sign of THAT -
+    # a selected course simply not showing up in a filtered table looks
+    # identical to one that got lost. `st.session_state.get("selection_mode",
+    # ...)` reads the mode radio's own key before that widget is
+    # instantiated further down this same run - safe, see
+    # _active_filter_count()'s docstring for why.
+    current_selection_mode = st.session_state.get("selection_mode", t("guided.mode.module"))
+    hidden_selected_count = _hidden_selected_count(all_modules, filtered, current_selection_mode)
+    if hidden_selected_count:
+        st.info(t("guided.filters_hide_selection_hint", count=hidden_selected_count))
 
     if not filtered:
         st.warning(t("guided.no_matches"))
