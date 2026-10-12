@@ -3623,29 +3623,48 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     guided_step2_card = card("guided-step2", "🔍", t("guided.step2_title").strip("*"))
     guided_step2_card.__enter__()
 
-    modul_nr_search = st.text_input(
+    # Modul-Nr/Kurs-Nr/Basiskurs used to be free-text search boxes matched by
+    # substring - a single typo (e.g. "APK10" instead of "AKP-10") silently
+    # produced zero results with no feedback on why, since the filter has no
+    # way to tell "typo" apart from "genuinely no match". Converted to
+    # st.multiselect, populated only with values that actually exist in the
+    # uploaded data: typing still narrows the dropdown (Streamlit's built-in
+    # autocomplete), but the student can only ever pick a real value, so a
+    # typo is caught immediately (nothing to select) instead of silently
+    # returning an empty table later.
+    modul_nr_options = sorted({str(getattr(m, "modul_nr", "") or "") for m in all_modules if getattr(m, "modul_nr", None)})
+    selected_modul_nrs = st.multiselect(
         t("guided.search.modul_nr"),
-        placeholder=t("guided.search.modul_nr_placeholder"),
+        options=modul_nr_options,
         key="filter_modul_nr",
-    ).strip().lower()
+        placeholder=t("guided.search.modul_nr_placeholder"),
+        help=t("guided.search.modul_nr_help"),
+    )
 
-    kurs_nr_search = st.text_input(
+    kurs_nr_options = sorted({str(getattr(m, "kurs_nr", "") or "") for m in all_modules if getattr(m, "kurs_nr", None)})
+    selected_kurs_nrs = st.multiselect(
         t("guided.search.kurs_nr"),
-        placeholder=t("guided.search.kurs_nr_placeholder"),
+        options=kurs_nr_options,
         key="filter_kurs_nr",
-    ).strip().lower()
+        placeholder=t("guided.search.kurs_nr_placeholder"),
+        help=t("guided.search.kurs_nr_help"),
+    )
 
     search_text = st.text_input(
         t("guided.search.text"),
         placeholder=t("guided.search.text_placeholder"),
         key="filter_search",
+        help=t("guided.search.text_help"),
     ).strip().lower()
 
-    base_search_text = st.text_input(
+    base_name_options = sorted({_split_course_variant(m.modulname)[0] for m in all_modules if m.modulname})
+    selected_base_names = st.multiselect(
         t("guided.search.base"),
-        placeholder=t("guided.search.base_placeholder"),
+        options=base_name_options,
         key="filter_base_search",
-    ).strip().lower()
+        placeholder=t("guided.search.base_placeholder"),
+        help=t("guided.search.base_help"),
+    )
 
     module_types = sorted({str(getattr(m, "modultyp", t("common.na"))) for m in all_modules if getattr(m, "modultyp", None)})
     selected_types = st.multiselect(
@@ -3703,13 +3722,13 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
     for module in all_modules:
         datum_value = getattr(module, "datum", None)
         day_label = _weekday_label(module)
-        modul_nr_value = str(getattr(module, "modul_nr", "") or "").lower()
-        kurs_nr_value = str(getattr(module, "kurs_nr", "") or "").lower()
+        modul_nr_value = str(getattr(module, "modul_nr", "") or "")
+        kurs_nr_value = str(getattr(module, "kurs_nr", "") or "")
 
-        if modul_nr_search and modul_nr_search not in modul_nr_value:
+        if selected_modul_nrs and modul_nr_value not in selected_modul_nrs:
             continue
 
-        if kurs_nr_search and kurs_nr_search not in kurs_nr_value:
+        if selected_kurs_nrs and kurs_nr_value not in selected_kurs_nrs:
             continue
 
         if selected_types and str(module.modultyp) not in selected_types:
@@ -3727,9 +3746,9 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         if zusatz_filter_mode == t("guided.filter.zusatzmodule_hide") and is_zusatzmodul:
             continue
 
-        if base_search_text:
+        if selected_base_names:
             base_name, _, _ = _split_course_variant(module.modulname)
-            if base_search_text not in base_name.lower():
+            if base_name not in selected_base_names:
                 continue
 
         if search_text:
