@@ -27,7 +27,11 @@ Besonders unterstützt werden:
 - Auswahlmodi:
 	- modulbasiert (empfohlen)
 	- kursbasiert
-	- zeilenbasiert
+	- "Alle Termine darstellen" (jede einzelne Session unabhängig von Modul-/Kursgruppierung, früher "zeilenbasiert" genannt)
+- Suche in Schritt 2 (Modul-Nr, Kurs-Nr, Basiskurs-Name) als Autovervollständigung statt Freitext: zeigt nur tatsächlich im Datensatz vorhandene Werte zur Auswahl an, ein Tippfehler führt so sofort sichtbar zu "keine Treffer" im Dropdown statt stillschweigend zu einer leeren Ergebnistabelle. Das allgemeine Stichwort-Suchfeld (Modulname/Dozierende/Typ gleichzeitig) bleibt bewusst echte Freitextsuche.
+- Die Kursauswahl in Schritt 2 bleibt beim Ändern eines Filters vollständig erhalten (auch wenn ein gefilterter Kurs dadurch kurzzeitig aus der Tabelle verschwindet) - zusätzlich gibt es direkt unter der Auswahltabelle eine einklappbare Liste "Deine aktuelle Auswahl" mit einem "✕"-Button pro Eintrag, um einzelne Kurse ohne Suchen in der grossen Tabelle wieder abzuwählen.
+- Schritt-3-Vorschau ("Vorschau deines Stundenplans"): Wochen chronologisch aufsteigend sortiert (aktuellste/früheste Woche oben), Prüfungseinsicht-Termine ausgeblendet (für die Semesterplanung nicht relevant), Prüfungstermine mit dickem rotem Rand markiert, echte Terminkonflikte (zeitliche Überschneidung zweier ausgewählter Kurse) mit dickem schwarzem Rand statt stillem Überdecken, Kachel-Kürzel nutzt die Kurs-Nr statt nur der Modul-Nr (unterscheidet z. B. AKP10-1 von AKP10-2 desselben Moduls)
+- "Quelle"-Spalte in allen Übersichtstabellen zeigt für jede Zeile eindeutig "BSc" oder "MSc" (nie eine leere Zelle)
 - Konfliktanalyse mit:
 	- Paar-Zusammenfassung
 	- Detailansicht nach Datum und Uhrzeit
@@ -46,6 +50,7 @@ Besonders unterstützt werden:
 	- Wochentagsverteilung mit automatischem Hinweis auf den dichtesten Tag ("📌 Freitag ist dein dichtester Tag mit X Terminen")
 	- pro Chart: Farbpalette (inkl. farbenblind-sicher) bzw. Farbskala wählbar, Wochentage ein-/ausblendbar, native Plotly-Werkzeugleiste (Zoom, Pan, PNG-Export)
 	- einheitlicher, theme-abhängiger Chart-Hintergrund (transparent, folgt Light/Dark) über alle Tabs hinweg
+	- Legenden-/Farbgruppen-Beschriftungen in allen Diagrammen auf 28 Zeichen gekürzt (mit "…"), damit sehr lange reale ZHAW-Kursnamen die Legende nicht sprengen - der volle Name bleibt per Hover-Tooltip sichtbar
 - Übersichtlichkeit für Einsteiger:innen: positiv formulierte Erfolgsmeldung bei konfliktfreier Auswahl ("🎉 Keine Zeitkonflikte..."), sichtbarer Hinweis wenn eine Grafik/Tabelle aus Platzgründen nur einen Ausschnitt zeigt (z. B. "Zeigt die 8 grössten von X Konflikten"), Dashboard zeigt bei Abwesenheitskonflikten nur den Status der aktuellen Auswahl und verweist für die volle Aufschlüsselung auf den Konfliktanalyse-Tab statt dieselbe Tabelle doppelt anzuzeigen
 - Export:
 	- XLSX
@@ -115,12 +120,12 @@ Zusätzliche Einstellungen in der Sidebar bzw. im Dashboard:
 
 Für Studierende, die laut individuellem Studienplan zusätzliche Module aus einem anderen Studiengang/einer anderen Hochschule belegen müssen (z. B. Passerelle: zusätzliche Bachelor-Module), gibt es in der Sidebar unterhalb von "Daten und Sprache" eine eigene, optionale Karte **"🎓 Zusatzmodule"** mit einem zweiten Datei-Upload. Die dort hochgeladene Liste wird automatisch mit der Hauptplanung zu einer gemeinsamen, konfliktgeprüften Liste zusammengeführt:
 
-- Module aus der Zusatzliste sind in allen Tabellen (geführte Planung, Rohdaten, Wochenplan, Konfliktanalyse) an der Spalte/Markierung "Quelle" (🎓 Zusatzmodul) erkennbar.
+- Module aus der Zusatzliste sind in allen Tabellen (geführte Planung, Rohdaten, Wochenplan, Konfliktanalyse) an der Spalte "Quelle" erkennbar - diese zeigt für jede Zeile eindeutig "BSc" (Zusatzliste) oder "MSc" (Hauptliste), nicht nur für Zusatzmodule eine Markierung und sonst eine leere Zelle.
 - Kollisionen zwischen einem Hauptmodul und einem Zusatzmodul werden genau wie Kollisionen innerhalb der Hauptliste erkannt - es gibt keinen separaten Prüfpfad.
 - Fehlt in der hochgeladenen Zusatzliste eine Wochentag-Spalte (nur Datum vorhanden, wie bei manchen Bachelor-Exporten), wird der Wochentag automatisch aus dem Datum abgeleitet.
 - Bietet eine Zeitperiode mehrere parallele Angebote mit unterschiedlichen Dozierenden, ohne dass die Zuteilung (z. B. Halbklasse) im Export schon erkennbar ist, werden alle Angebote vorerst übernommen und mit einem Hinweis im Abschnitt "Bestandteile je gewähltem Modul" der geführten Planung sichtbar markiert, statt die Mehrdeutigkeit stillschweigend zu verstecken.
 - Wird nur die Zusatzliste wieder entfernt, bleibt die Hauptplanung unverändert bestehen; wird die Hauptdatei entfernt, wird die gesamte Planung (inkl. Zusatzmodule) zurückgesetzt.
-- In Schritt 2 der geführten Planung erscheint (nur wenn eine Zusatzliste hochgeladen wurde) ein zusätzlicher Filter "Alle anzeigen"/"Nur Zusatzmodule"/"Zusatzmodule ausblenden".
+- In Schritt 2 der geführten Planung erscheint (nur wenn eine Zusatzliste hochgeladen wurde) ein zusätzlicher Bachelor-/Master-Filter "Alle Kurse"/"Nur Bachelorkurse (Zusatzmodule)"/"Nur Masterkurse".
 - Das Dashboard zeigt (ebenfalls nur bei vorhandener Zusatzliste) eine zusätzliche Kennzahl "Zusatzmodule ausgewählt".
 - Export: die ICS-Beschreibung bekommt eine Zeile "Zusatzmodul (Passerelle)"; die Excel-Datei eine Spalte "Quelle" ("Hauptliste"/"Zusatzmodul").
 - **Kritische Ersttermin-Konflikte** (🎓, nur bei hochgeladener Zusatzliste): Bachelor- und Mastermodule überschneiden sich bei Passerelle-Studierenden besonders oft - ein Konflikt ausgerechnet im 1. oder 2. Termin eines Kurses ist aber deutlich riskanter als später, weil dort meist einmalige Informationen zu Leistungsnachweisen, Prüfungsmodalitäten, Gruppenbildung, Ablauf und Literatur vermittelt werden. Das Dashboard zeigt dazu einen kurzen Hinweis/Zähler, die volle Detailtabelle (Datum, beide Kurse, welche Seite betroffen ist) steht im Konfliktanalyse-Tab. Erkennt sowohl Bachelor↔Master- als auch Bachelor↔Bachelor-Konflikte; reine Master↔Master-Konflikte gehören zur normalen Konfliktanalyse und werden hier nicht separat aufgeführt. Die Erkennungslogik (`find_critical_first_session_conflicts()` in `src/scheduler.py`) ist - anders als das meiste in `src/app.py` - vollständig mit pytest automatisiert getestet, siehe [docs/TESTING-README.md](docs/TESTING-README.md).
@@ -203,7 +208,7 @@ pytest:
 pytest -q
 ```
 
-217 Tests über 8 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`, `tests/test_zusatzmodule_fixtures.py`, `tests/test_zusatzmodule_allowlist.py`, `tests/test_deployment_config.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen (deckt auch die `feedback.*`-Keys des Feedback-Tabs ab), Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten), mehrerer Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden, `requirements.txt`-numpy-Pin) und der umfangreichen Zusatzmodul-/Passerellen-Tests gegen realistisch grosse, aus den echten HS26-Katalogen fiktionalisierte Testdaten (Wochentag-Ableitung, `ist_zusatzmodul`-Kennzeichnung, Konflikterkennung über Haupt- und Zusatzliste hinweg, Modul-Nr.-Kollisionsszenario, Export bei realistischem Umfang). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
+242 Tests über 9 Dateien (`tests/test_models.py`, `tests/test_scheduler.py`, `tests/test_export.py`, `tests/test_i18n.py`, `tests/test_data_loader.py`, `tests/test_zusatzmodule_fixtures.py`, `tests/test_zusatzmodule_allowlist.py`, `tests/test_deployment_config.py`, `tests/test_app_helpers.py`), inkl. Konsistenzcheck der de/en/fr-Übersetzungen (deckt auch die `feedback.*`-Keys des Feedback-Tabs ab), Fehlerpfaden (fehlende Pflichtspalten, komplett ungültige Daten), mehrerer Regressionstests für real gefundene Bugs (NaT-Datumsabsturz, ICS-Export liess Termine ohne Datum verschwinden, `requirements.txt`-numpy-Pin), der umfangreichen Zusatzmodul-/Passerellen-Tests gegen realistisch grosse, aus den echten HS26-Katalogen fiktionalisierte Testdaten (Wochentag-Ableitung, `ist_zusatzmodul`-Kennzeichnung, Konflikterkennung über Haupt- und Zusatzliste hinweg, Modul-Nr.-Kollisionsszenario, Export bei realistischem Umfang) sowie (neu) gezielter Tests für die wenigen reinen, Streamlit-unabhängigen Hilfsfunktionen in `src/app.py` (Kurznamen-Kürzung, Kurs-Nr-Kacheltext, Pruefungseinsicht-Erkennung, Quelle-Spalte, Schritt-3-Wochensortierung/Prüfungs- und Konflikt-Markierung). Volle Details, welche Datei was abdeckt und was bewusst nicht getestet ist: [docs/TESTING-README.md](docs/TESTING-README.md).
 
 ## Testdaten
 

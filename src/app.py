@@ -3319,15 +3319,39 @@ def _render_selected_items_removal(all_modules: List[Any], selection_mode: str) 
     way to remove a single item short of re-finding it above or using
     "Alle abwählen" (which clears everything).
 
-    Deliberately called AFTER the mode-specific selection tables further up
-    in render_guided_planning() (not before), so the list it shows already
-    reflects whatever that run's table/"Alle auswählen" interaction just
-    wrote to session_state. Because of that placement, a removal click here
-    is the LAST thing to touch selected_course_bases/selected_row_ids in
-    this run - nothing later re-reads it - so an explicit `st.rerun()` is
-    actually needed (unlike this project's usual rule against redundant
-    reruns after a button sets session_state something later in the same
-    run already reads: that rule's precondition doesn't hold here).
+    Called from render_guided_planning() right AFTER guided_step2_card has
+    been cleanly exited (`guided_step2_card.__exit__(None, None, None)`),
+    deliberately not from inside it, and deliberately DOES call
+    `st.rerun()` after a removal - both on purpose, the second one learned
+    the hard way:
+
+    - An earlier version placed this function's call INSIDE the still-open
+      guided_step2_card (a `card()` whose `.__enter__()`/`.__exit__()` are
+      called manually in this function, not via `with` - see card()'s own
+      docstring for why) and called `st.rerun()` from the "✕" button
+      handler. `st.rerun()` raises an exception to abort the script early;
+      raising it while that manually-managed card was still entered but
+      not yet exited meant `.__exit__()` - and the `st.container()` it
+      wraps - never ran, abandoning that container mid-`with`. Confirmed
+      live with Playwright: this reproduced a historical, already-fixed-
+      once bug almost exactly - the main tab strip's own active-tab
+      indicator kept updating correctly on every click, but the visible
+      panel content silently froze on "Geführte Planung" no matter which
+      tab was clicked afterwards. Explicit `key=` on both the tabs and the
+      file uploader (the fix applied the first time this bug appeared) did
+      NOT prevent it this time, since the actual cause this time was the
+      abandoned card container, not a keyless widget.
+    - The fix: call this function only after the card housing the
+      selection tables has been fully, cleanly exited, so a `st.rerun()`
+      from inside its own `with st.expander(...)` block (a REAL `with`
+      statement, whose `__exit__` Python guarantees runs even when an
+      exception/rerun propagates through it) cannot abandon anything.
+      `st.rerun()` is needed here (unlike _select_all_controls()'s buttons)
+      because this function renders AFTER the mode-specific tables that
+      compute/consume the selection for this run - nothing later in the
+      script would otherwise re-read a removal made here, so without an
+      explicit rerun the removal wouldn't visibly take effect until the
+      student's next unrelated interaction.
 
     Operates on `all_modules` (not the currently filtered subset) and reads
     the same persisted selection keys ("selected_course_bases" for
@@ -4300,9 +4324,19 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         selected_modules = [m for idx, m in modules_with_id if idx in selected_ids]
 
     st.info(t("guided.current_selection", selected=len(selected_modules), filtered=len(filtered)))
-    _render_selected_items_removal(all_modules, selection_mode)
     st.session_state.selected_modules = selected_modules
     guided_step2_card.__exit__(None, None, None)
+
+    # Called AFTER guided_step2_card.__exit__(), not before - see
+    # _render_selected_items_removal()'s own docstring for why: this
+    # function's "✕" button needs `st.rerun()` for the removal to show up
+    # immediately, and raising a rerun from INSIDE a manually-entered-but-
+    # not-yet-exited card() (as an earlier version of this code did) left
+    # that card's underlying st.container() context abandoned mid-`yield`,
+    # which reproduced a historical "tab strip's own active-tab indicator
+    # updates, but the visible panel content freezes" bug. Calling it here,
+    # after the card has already been cleanly exited, avoids that.
+    _render_selected_items_removal(all_modules, selection_mode)
 
     with card("guided-step3-preview", "🗓️", t("guided.step3_preview_title").strip("*")):
         _render_semester_preview_grid(all_modules, selected_modules)
