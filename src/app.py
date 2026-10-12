@@ -2319,6 +2319,16 @@ def _calculate_module_overlap_summary(modules: List[Any]) -> pd.DataFrame:
     summary_rows = [
         {
             c("base_course"): course_key,
+            # Separate, always-short column just for _overlap_bar_figure()'s
+            # Y-axis - `course_key` (_module_group_title()) is already short
+            # in the common real-data case (a Modul-Nr), but falls back to
+            # the full, untruncated base course title when a module has no
+            # Modul-Nr at all, which would otherwise feed a long name
+            # straight into a chart axis. `c("base_course")` itself is left
+            # untouched since this same dataframe also drives a plain table
+            # further down (render_dashboard) where the full name is still
+            # useful.
+            "_chart_label": _truncate_text(course_key, max_len=24),
             c("weekday"): ", ".join(sorted(data["weekdays"])),
             c("duration_min"): data["duration_min"],
             c("occurrences"): data["occurrences"],
@@ -2856,6 +2866,18 @@ def _weekly_timeline_slots(modules: List[Any]) -> list[dict]:
     hover would arbitrarily reflect whichever one Plotly drew last. Merging
     same-slot occurrences into one row fixes that and, as a side effect,
     is exactly the data a "N Termine diese Woche" summary needs.
+
+    `short_label` is the on-bar text _weekly_timeline_figure() prints
+    directly on each Gantt bar (`_module_short_code()` - the same Modul-/
+    Kurs-Nr-based short code used for the Schritt-3 preview grid's tiles,
+    e.g. "AKP10-1") - NOT the raw course title despite an earlier version
+    of this function using exactly that (`module.modulname`, routinely
+    60+ characters for real ZHAW titles) under this same key, which made
+    every bar's printed text as unreadable as the long names this whole
+    short-label mechanism exists to avoid. Reported live by a user
+    ("Wochenübersicht"-Balkendiagramme unlesbar, zu lange Kursnamen). The
+    full name remains available via `label`/the `hover_name=` the chart
+    sets from it - only the permanently-visible on-bar text changed.
     """
     slots: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for module in modules:
@@ -2869,7 +2891,7 @@ def _weekly_timeline_slots(modules: List[Any]) -> list[dict]:
             {
                 "weekday": weekday,
                 "label": label,
-                "short_label": str(getattr(module, "modulname", "") or label).strip(),
+                "short_label": _module_short_code(module),
                 "start": start_key,
                 "end": end_key,
                 "duration_minutes": max(
@@ -3154,6 +3176,14 @@ def _overlap_bar_figure(summary_df: pd.DataFrame, color_scale: str = "Reds"):
     to the top of the chart (reversed y-axis) matching the "biggest first"
     reading order most dashboards use for a ranked list.
 
+    The y-axis plots `summary_df`'s "_chart_label" column (a short, always-
+    truncated label - see _calculate_module_overlap_summary()'s docstring
+    for why a second column instead of shortening `c("base_course")`
+    itself), not the full course name - reported by a user that bar charts
+    across the app were unreadable with real (often 60+ character) ZHAW
+    course titles. The full name is still one hover away via `hover_name=
+    c("base_course")`.
+
     `color_scale`: a Plotly continuous-scale name (see
     CONTINUOUS_COLOR_SCALES) - unlike the other charts this one colors by a
     numeric value (overlap %), not a category, so it needs a *continuous*
@@ -3164,12 +3194,13 @@ def _overlap_bar_figure(summary_df: pd.DataFrame, color_scale: str = "Reds"):
     fig = px.bar(
         top,
         x=c("overlap_total_min"),
-        y=c("base_course"),
+        y="_chart_label",
         orientation="h",
         title=t("chart.overlap_title"),
         color=c("overlap_pct"),
         color_continuous_scale=color_scale,
         text=c("overlap_total_min"),
+        hover_name=c("base_course"),
     )
     # "auto" (not "outside"): this chart lives in a half-width dashboard
     # column, so the longest bar can reach close to the plot's right edge -
@@ -3178,7 +3209,16 @@ def _overlap_bar_figure(summary_df: pd.DataFrame, color_scale: str = "Reds"):
     # whenever there isn't room to the right, instead of cutting it off.
     fig.update_traces(texttemplate="%{text} min", textposition="auto", textfont_size=12)
     fig.update_yaxes(autorange="reversed", automargin=True)
-    fig.update_layout(height=max(440, 52 * len(top) + 140), margin=dict(l=10, r=70, t=40, b=10))
+    fig.update_layout(
+        height=max(440, 52 * len(top) + 140),
+        margin=dict(l=10, r=70, t=40, b=10),
+        # Without this, Plotly shows the internal "_chart_label" column
+        # name itself as the y-axis title, since (unlike every `c(...)`-
+        # named column) it was never routed through i18n - see that
+        # column's construction in _calculate_module_overlap_summary() for
+        # why it's an internal, chart-only column in the first place.
+        yaxis_title="",
+    )
     return _apply_chart_theme(fig)
 
 
@@ -5457,12 +5497,28 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
             module_2_label = _module_label(right)
             if getattr(right, "ist_zusatzmodul", False):
                 module_2_label = f"🎓 {module_2_label}"
+            # Separate, always-short columns just for the "Top Konflikte"
+            # bar chart below (`_module_1_chart_label`/`_2`) - `c("module_1")`/
+            # `c("module_2")` themselves stay full-length since this same
+            # dataframe also drives the plain conflict table further down,
+            # where the full name is still useful. Reuses
+            # _module_legend_label() (the same truncation already applied
+            # to every OTHER chart's legend/axis labels in this file) for
+            # consistency, with the same 🎓 prefix convention as above.
+            module_1_chart_label = _module_legend_label(left)
+            if getattr(left, "ist_zusatzmodul", False):
+                module_1_chart_label = f"🎓 {module_1_chart_label}"
+            module_2_chart_label = _module_legend_label(right)
+            if getattr(right, "ist_zusatzmodul", False):
+                module_2_chart_label = f"🎓 {module_2_chart_label}"
             conflict_rows.append(
                 {
                     c("date"): _conflict_date_label(left),
                     c("weekday"): _weekday_label(left),
                     c("module_1"): module_1_label,
                     c("module_2"): module_2_label,
+                    "_module_1_chart_label": module_1_chart_label,
+                    "_module_2_chart_label": module_2_chart_label,
                     c("time_1"): f"{left.startzeit.strftime('%H:%M')} - {left.endzeit.strftime('%H:%M')}",
                     c("time_2"): f"{right.startzeit.strftime('%H:%M')} - {right.endzeit.strftime('%H:%M')}",
                     c("overlap_min"): overlap,
@@ -5508,12 +5564,26 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
                 fig = px.bar(
                     top_conflicts,
                     x=c("overlap_min"),
-                    y=c("module_1"),
-                    color=c("module_2"),
+                    y="_module_1_chart_label",
+                    color="_module_2_chart_label",
                     orientation="h",
                     title=t("chart.conflict_top"),
+                    hover_name=c("module_1"),
+                    hover_data={c("module_2"): True},
                 )
-                fig.update_layout(height=max(420, 44 * len(top_conflicts) + 120), margin=dict(l=10, r=10, t=40, b=10))
+                fig.update_layout(
+                    height=max(420, 44 * len(top_conflicts) + 120),
+                    margin=dict(l=10, r=10, t=40, b=10),
+                    # Without this, Plotly would show the internal
+                    # "_module_1_chart_label"/"_module_2_chart_label" column
+                    # names themselves as the axis/legend titles, since
+                    # those (unlike every `c(...)`-named column) were never
+                    # routed through i18n - see their construction above for
+                    # why they're internal, chart-only columns in the first
+                    # place.
+                    yaxis_title="",
+                    legend_title_text=t("chart.legend_modules"),
+                )
                 st.plotly_chart(_apply_chart_theme(fig), use_container_width=True)
                 # top_conflicts is always capped at 8 rows (see .head(8)
                 # above) so the bar chart stays readable - but a silent cap
@@ -5535,8 +5605,14 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
                 st.plotly_chart(_apply_chart_theme(fig_date), use_container_width=True)
 
         with card("conflicts-details", "🔬", t("conflicts.details_title").strip("*")):
+            # Drop the chart-only short-label columns added above (see the
+            # comment at `_module_1_chart_label`'s construction) - this
+            # table shows the full, untruncated module names instead.
+            conflict_table_df = conflict_df.drop(
+                columns=["_module_1_chart_label", "_module_2_chart_label"], errors="ignore"
+            )
             st.dataframe(
-                _style_sequential_red(conflict_df, c("overlap_min")),
+                _style_sequential_red(conflict_table_df, c("overlap_min")),
                 hide_index=True,
                 width="stretch",
                 column_config={

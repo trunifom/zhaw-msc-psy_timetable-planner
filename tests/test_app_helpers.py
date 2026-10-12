@@ -340,3 +340,60 @@ def test_hidden_selected_count_no_selection_at_all_is_zero():
     m = make_module(modulname="Kurs")
     count = app._hidden_selected_count([m], [], app.t("guided.mode.module"))
     assert count == 0
+
+
+# --- _weekly_timeline_slots: on-bar text must be short, not the raw title --
+
+def test_weekly_timeline_slots_short_label_is_module_short_code_not_full_title():
+    # Regression guard: an earlier version set "short_label" to the raw,
+    # untruncated `modulname` despite the name - reported by a user as
+    # making the Wochenplan Gantt chart's on-bar text unreadable with real
+    # (60+ character) ZHAW course titles. It must be the same short code
+    # _module_short_code() already uses for the Schritt-3 preview tiles.
+    long_title = "Wissenschaftstheoretische und methodologische Grundlagen der Psychologie"
+    m = make_module(modulname=long_title, modul_nr="AS1", kurs_nr="AS1-1")
+    slots = app._weekly_timeline_slots([m])
+    assert len(slots) == 1
+    assert slots[0]["short_label"] == app._module_short_code(m) == "AS1-1"
+    assert slots[0]["short_label"] != long_title
+    # The full name must still be available somewhere on the slot (used for
+    # hover_name by the chart that consumes this) - not lost, just not the
+    # permanently-visible on-bar text anymore.
+    assert long_title in slots[0]["label"]
+
+
+def test_weekly_timeline_slots_distinguishes_same_module_different_kurs_nr():
+    # Two course components of the same module (see _module_short_code()'s
+    # own test for the identical AKP10-1/-2 scenario) must still render
+    # distinguishable short codes on the Gantt chart, not both "AKP10".
+    m1 = make_module(modulname="Kurs 1", modul_nr="AKP10", kurs_nr="AKP10-1")
+    m2 = make_module(modulname="Kurs 2", modul_nr="AKP10", kurs_nr="AKP10-2", startzeit=time(14, 0), endzeit=time(16, 0))
+    slots = {slot["short_label"] for slot in app._weekly_timeline_slots([m1, m2])}
+    assert slots == {"AKP10-1", "AKP10-2"}
+
+
+# --- _calculate_module_overlap_summary: chart column must stay short -----
+
+def test_overlap_summary_chart_label_is_truncated_even_without_modul_nr():
+    # _module_group_title() (the function this summary groups by) falls
+    # back to the full, untruncated base course title when a module has no
+    # Modul-Nr at all - a real edge case this summary's own "_chart_label"
+    # column exists specifically to guard against, so a title-only module
+    # still can't feed a long name straight into the overlap bar chart's
+    # axis (_overlap_bar_figure).
+    long_title = "Wissenschaftstheoretische und methodologische Grundlagen der Psychologie"
+    m = make_module(modulname=long_title)  # no modul_nr at all
+    summary = app._calculate_module_overlap_summary([m])
+    assert len(summary) == 1
+    row = summary.iloc[0]
+    assert row["_chart_label"] != long_title
+    assert len(row["_chart_label"]) <= 24
+    # The untruncated value remains available under its own, table-facing
+    # column (c("base_course")) - only the chart-only column is shortened.
+    assert row[app.c("base_course")] == long_title
+
+
+def test_overlap_summary_chart_label_matches_short_modul_nr_unchanged():
+    m = make_module(modulname="Kurs", modul_nr="AS1")
+    summary = app._calculate_module_overlap_summary([m])
+    assert summary.iloc[0]["_chart_label"] == "AS1"
