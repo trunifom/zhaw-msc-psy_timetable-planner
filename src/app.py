@@ -1556,12 +1556,16 @@ def _style_source_rows(df: pd.DataFrame, source_col: str) -> Any:
     column is always filled now ("BSc"/"MSc" for every row, not blank for
     the main-list case) - an emptiness check would tint every row.
 
-    Only usable on plain `st.dataframe(...)` tables - `st.data_editor(...)`
-    (used for the three guided-planning selection tables) does NOT support
-    pandas Styler output at all (raises an error). Those editable tables
-    use a 🎓 label prefix instead (see the "module"/"course"/"row" mode
-    blocks in render_guided_planning() and _module_to_row()) as the
-    equivalent, data_editor-compatible visual marker.
+    Used for the read-only tables (Wochenplan, Rohdaten, ...) - the three
+    guided-planning selection tables ("module"/"course"/"row" mode) still
+    use a 🎓 label prefix instead (see those blocks in
+    render_guided_planning() and _module_to_row()), left as-is rather than
+    switched to this Styler-based approach when those tables were migrated
+    from `st.data_editor` to a natively row-selectable `st.dataframe` (see
+    _dataframe_row_selection()) - combining Styler output with `on_select`
+    row selection on the same `st.dataframe` call wasn't attempted/verified
+    in that migration, so the existing, already-working 🎓 prefix was kept
+    rather than risk it.
     """
     bsc_marker = t("col.source.bsc")
 
@@ -1709,20 +1713,20 @@ def _matches_halfday(module: Any, halfday: str) -> bool:
     return False
 
 
-def _module_to_row(module: Any, module_id: int, selected: bool) -> dict:
+def _module_to_row(module: Any, module_id: int) -> dict:
     """Build one localized dict/row for the row-level selection table in
-    render_guided_planning's "row" selection mode (st.data_editor with a
-    checkbox column). `module_id` is the row's position in the full
-    all_modules list, used later to map checked rows back to module objects."""
+    render_guided_planning's "row" selection mode (a natively row-
+    selectable st.dataframe - see _dataframe_row_selection()). `module_id`
+    is the row's position in the full all_modules list, used later to map
+    selected rows back to module objects."""
     datum_value = getattr(module, "datum", None)
-    # 🎓-Präfix statt echter Zeilenfarbe: st.data_editor unterstützt keine
+    # 🎓-Präfix statt echter Zeilenfarbe: st.dataframe unterstützt keine
     # pandas-Styler-Objekte (siehe Kommentar bei _style_source_rows) - siehe
     # das gleiche Muster in der "module"/"course" mode-Tabelle oben.
     module_label = module.modulname
     if getattr(module, "ist_zusatzmodul", False):
         module_label = f"🎓 {module_label}"
     return {
-        c("select"): selected,
         c("id"): module_id,
         c("module_no"): getattr(module, "modul_nr", None) or "",
         c("course_no"): getattr(module, "kurs_nr", None) or "",
@@ -3308,6 +3312,117 @@ def _select_all_controls(state_key: str, all_keys: list) -> tuple[int, list | No
     return st.session_state.get(version_key, 0), forced_selection
 
 
+def _dataframe_row_selection(
+    df: pd.DataFrame,
+    row_keys_in_order: list,
+    desired_keys: set,
+    df_key: str,
+    **dataframe_kwargs,
+) -> set:
+    """
+    Render `df` as a natively, reliably clickable multi-row-selectable
+    table (`st.dataframe(..., on_select="rerun", selection_mode=
+    "multi-row")`, added in Streamlit 1.35) and return the set of KEYS
+    (from `row_keys_in_order`, one entry per row of `df`, same order) that
+    end up selected after this call. Used by all three guided-planning
+    selection tables ("module"/"course"/"row" mode).
+
+    Replaces this project's previous `st.data_editor` + `CheckboxColumn`
+    approach, which was confirmed (via a live, hands-on Playwright
+    reproduction, documented in docs/TESTING-README.md) to be genuinely
+    unreliable for plain mouse clicks: a single click only selected/
+    focused the checkbox cell without toggling it (only click+Space
+    reliably toggled it), and clicking a different row before the previous
+    click's rerun had finished reloading the table could silently lose
+    that earlier selection to an in-flight race. This was a real frontend
+    defect in that specific widget (glide-data-grid), not something an
+    app-level session_state/rerun fix could address - the most this file
+    could do about it before was an in-UI "please wait between clicks"
+    hint. Native row selection doesn't use that grid component, so none of
+    this applies to it.
+
+    `desired_keys`: the semantically "correct" selection for THIS render -
+    e.g. the persisted cross-filter selection from session_state, or an
+    "Alle auswählen"/"Alle abwählen" override - used to (re-)seed the
+    widget's OWN selection state whenever that's necessary (see below), so
+    the student always sees a result consistent with what they should see,
+    not just whatever row POSITIONS happened to be selected before.
+
+    Why only "sometimes" reseed, not every rerun: `st.dataframe`'s row
+    selection is tracked by POSITION in the `df` passed to THIS call, not
+    by any stable per-row identity, AND is entirely opaque to whatever the
+    caller's own "semantic truth" (e.g. `selected_course_bases`) says - it
+    does not auto-reconcile against that the way `st.data_editor` used to
+    appear to (that widget actually diffs its displayed VALUES against
+    user edits, which is why the old `c("select")`-column approach picked
+    up e.g. a Schritt-2 "✕" removal-list click for free; this one needs
+    to be told explicitly). Two different things can make the widget's own
+    retained selection wrong and in need of an explicit reseed:
+      1. The previous render's `df` had a different row count/order (e.g.
+         the student just narrowed or widened a Schritt-2 filter) - the
+         widget's remembered POSITIONS would now silently point at the
+         WRONG rows.
+      2. `desired_keys` itself changed for a reason that has nothing to do
+         with this exact table - e.g. the "✕" button in
+         _render_selected_items_removal() or a filter chip's "✕" changed
+         `selected_course_bases`/`selected_row_ids` directly and forced a
+         fresh rerun; from this function's point of view the row set may
+         be identical, but what OUGHT to be selected has changed under it.
+    A companion session_state key records `(row_keys_in_order, desired_
+    keys)` as it stood the last time `df_key` was rendered; if EITHER part
+    differs this time (or `df_key` has never been used before - e.g.
+    right after a version bump from "Alle auswählen"/"Alle abwählen",
+    which always mints a fresh key), this function explicitly pre-seeds
+    `st.session_state[df_key]` from `desired_keys`, mapped to this
+    render's row positions, BEFORE instantiating the widget (the standard,
+    Streamlit-documented pattern for setting a keyed stateful widget's
+    value). When NEITHER part changed since last time, this function does
+    NOT touch session_state at all - letting the widget's own already-
+    updated state (e.g. a click the student just made THIS rerun) flow
+    through untouched.
+
+    Important subtlety that caused a real, live-reproduced bug during
+    development: the signature's second half is recorded from what this
+    call actually ACHIEVES (`checked_now`, returned to the caller), NOT
+    from the `desired_keys` it was given going in. `desired_keys` is
+    computed by the caller from `selected_course_bases`/`selected_row_ids`
+    BEFORE this call - and the caller only writes the updated value back
+    AFTER this call returns - so on every subsequent render, `desired_keys`
+    reflects the PREVIOUS click's result, one step behind what was just
+    recorded as the signature if the signature were taken from
+    `desired_keys` instead. An earlier version did exactly that, and the
+    result (confirmed live: clicking two different rows in the same table
+    in succession) was that the SECOND click's own selection got silently
+    reseeded back to just the first click's result - every click but the
+    first was being discarded. Recording the signature from `checked_now`
+    instead means a click in THIS table naturally keeps the signature in
+    sync one render later (once the caller's write-back lands in
+    `desired_keys`), so consecutive clicks no longer fight each other,
+    while an EXTERNAL change (a filter chip's "✕", the selected-items
+    removal list, "Alle auswählen"/"Alle abwählen") still shows up as a
+    genuine mismatch between `desired_keys` and the last-achieved
+    `checked_now` and correctly triggers a reseed.
+    """
+    signature_key = f"{df_key}__rowset_sig"
+    row_keys_tuple = tuple(row_keys_in_order)
+    stored_signature = st.session_state.get(signature_key)
+    if df_key not in st.session_state or stored_signature is None or stored_signature != (row_keys_tuple, frozenset(desired_keys)):
+        desired_positions = [i for i, key in enumerate(row_keys_in_order) if key in desired_keys]
+        st.session_state[df_key] = {"selection": {"rows": desired_positions}}
+
+    event = st.dataframe(
+        df,
+        key=df_key,
+        on_select="rerun",
+        selection_mode="multi-row",
+        **dataframe_kwargs,
+    )
+    selected_positions = event.selection.rows
+    checked_now = {row_keys_in_order[i] for i in selected_positions if i < len(row_keys_in_order)}
+    st.session_state[signature_key] = (row_keys_tuple, frozenset(checked_now))
+    return checked_now
+
+
 def _render_selected_items_removal(all_modules: List[Any], selection_mode: str) -> None:
     """
     Render the student's current selection as a removable list (one entry
@@ -4154,7 +4269,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         module_version, module_forced_selection = _select_all_controls("module_selector", sorted(grouped_modules.keys()))
 
         module_rows = []
-        selected_keys_prev = set(st.session_state.get("selected_course_bases", []))
+        module_row_keys: list[str] = []
         for key, items in sorted(grouped_modules.items(), key=lambda pair: _module_group_display(pair[0], pair[1]).lower()):
             courses = sorted({str(getattr(m, "kurs_nr", "") or "") for m in items if getattr(m, "kurs_nr", None)})
             exam_count = sum(1 for m in items if getattr(m, "ist_pruefung", False))
@@ -4168,10 +4283,8 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             # "Quelle" column below is now always filled with an unambiguous
             # "BSc"/"MSc" value, so a second marker on this column was
             # reported as confusing/redundant rather than helpful.
-            is_selected = (key in module_forced_selection) if module_forced_selection is not None else (key in selected_keys_prev)
             module_rows.append(
                 {
-                    c("select"): is_selected,
                     c("module_group"): label,
                     c("module_key"): key,
                     c("courses"): len(courses),
@@ -4187,31 +4300,28 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     c("source"): _zusatzmodul_marker(items[0]),
                 }
             )
+            module_row_keys.append(key)
 
         module_df = pd.DataFrame(module_rows)
-        # Each checkbox click triggers a full script rerun to commit the
-        # edit - clicking a DIFFERENT checkbox again before that rerun has
-        # finished (page still reloading) can lose the just-made selection,
-        # since the new click arrives while the previous one is still
-        # in flight. Confirmed with a real user across multiple browsers:
-        # the table itself is fine, clicking faster than the rerun settles
-        # is what causes a selection to silently revert.
-        st.caption(t("guided.checkbox_click_hint"))
-        edited_module_df = st.data_editor(
+        module_desired_keys = (
+            set(module_forced_selection)
+            if module_forced_selection is not None
+            else set(st.session_state.get("selected_course_bases", []))
+        )
+        checked_now = _dataframe_row_selection(
             module_df,
+            module_row_keys,
+            module_desired_keys,
+            df_key=f"module_group_selector_df_{module_version}",
             hide_index=True,
             width="stretch",
-            disabled=[c("module_group"), c("module_key"), c("courses"), c("rows"), c("exam_dates"), c("period"), c("source")],
-            column_config={c("select"): st.column_config.CheckboxColumn(c("select"))},
-            key=f"module_group_selector_editor_{module_version}",
         )
 
         # Merge rather than overwrite: a key that isn't currently visible in
         # this table (filtered out) keeps whatever selection state it had
-        # before - only the keys actually shown/editable just now are
-        # authoritative from `edited_module_df`. See the comment at
-        # `grouped_modules_all` above for why this matters.
-        checked_now = set(edited_module_df.loc[edited_module_df[c("select")] == True, c("module_key")].tolist())
+        # before - only the keys actually shown just now are authoritative
+        # from `checked_now`. See the comment at `grouped_modules_all`
+        # above for why this matters.
         selected_keys_prev_all = set(st.session_state.get("selected_course_bases", []))
         selected_keys = (selected_keys_prev_all - set(grouped_modules.keys())) | checked_now
         st.session_state.selected_course_bases = sorted(selected_keys)
@@ -4463,7 +4573,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         course_version, course_forced_selection = _select_all_controls("course_selector", sorted(grouped.keys()))
 
         group_rows = []
-        selected_bases_prev = set(st.session_state.get("selected_course_bases", []))
+        group_row_keys: list[str] = []
         for base, items in sorted(grouped.items(), key=lambda item: item[0].lower()):
             dates = sorted({it[1].datum for it in items if getattr(it[1], "datum", None) is not None})
             variants = sorted({it[2] for it in items if it[2]})
@@ -4471,11 +4581,9 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             first_date = dates[0].strftime("%Y-%m-%d") if dates else ""
             last_date = dates[-1].strftime("%Y-%m-%d") if dates else ""
             date_range = f"{first_date} - {last_date}" if first_date and last_date else ""
-            default_selected = (base in course_forced_selection) if course_forced_selection is not None else (base in selected_bases_prev)
 
             group_rows.append(
                 {
-                    c("select"): default_selected,
                     c("base_course"): base,
                     c("rows"): len(items),
                     c("variants_count"): len(variants),
@@ -4484,28 +4592,29 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     c("source"): _zusatzmodul_marker(items[0][1]),
                 }
             )
+            group_row_keys.append(base)
 
         df_groups = pd.DataFrame(group_rows)
-        # See the identical caption/comment at the "module" mode's
-        # data_editor above - same underlying cause, same table type.
-        st.caption(t("guided.checkbox_click_hint"))
-        edited_groups = st.data_editor(
+        # See the identical comment at the "module" mode table above - same
+        # underlying cause (native row selection instead of a
+        # data_editor/CheckboxColumn), same reasoning.
+        course_desired_keys = (
+            set(course_forced_selection)
+            if course_forced_selection is not None
+            else set(st.session_state.get("selected_course_bases", []))
+        )
+        checked_now = _dataframe_row_selection(
             df_groups,
+            group_row_keys,
+            course_desired_keys,
+            df_key=f"course_group_selector_df_{course_version}",
             hide_index=True,
             width="stretch",
-            disabled=[c("base_course"), c("rows"), c("variants_count"), c("exam_dates"), c("period"), c("source")],
-            column_config={c("select"): st.column_config.CheckboxColumn(c("select"))},
-            key=f"course_group_selector_editor_{course_version}",
         )
 
-        # No 🎓 prefix here anymore (see the "module" mode table's identical
-        # comment) - `base_course` is already the plain `base` key, so it
-        # round-trips through the table unchanged.
-        #
         # Merge rather than overwrite (see "module" mode's identical fix):
         # a base course not currently visible in this table keeps whatever
         # selection state it had before.
-        checked_now = set(edited_groups.loc[edited_groups[c("select")] == True, c("base_course")].tolist())
         selected_bases_prev_all = set(st.session_state.get("selected_course_bases", []))
         selected_bases = (selected_bases_prev_all - set(grouped.keys())) | checked_now
         st.session_state.selected_course_bases = sorted(selected_bases)
@@ -4528,13 +4637,12 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 
     else:
         # "row" mode: the finest-grained option - every individual filtered
-        # schedule row gets its own checkbox in a flat data_editor table, no
-        # grouping/variant logic at all. `module_id` (the row's position in
-        # the master all_modules list, from filtered_with_ids) is stashed in
-        # the table itself (c("id") column) purely so the edited table can
+        # schedule row is natively selectable (see _dataframe_row_selection),
+        # no grouping/variant logic at all. `module_id` (the row's position
+        # in the master all_modules list, from filtered_with_ids) is stashed
+        # in the table itself (c("id") column) purely so the selection can
         # be mapped back to module objects below via `selected_ids`/
-        # `modules_with_id`, since data_editor returns a plain DataFrame,
-        # not the original objects.
+        # `modules_with_id`.
         included_ids = [
             module_id
             for module_id, module in filtered_with_ids
@@ -4549,46 +4657,29 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         selected_row_ids_prev_all = set(st.session_state.get("selected_row_ids", []))
 
         rows = []
+        row_ids_in_order: list[int] = []
         excluded_exam_rows = 0
         for module_id, module in filtered_with_ids:
             _, _, is_exam = _split_course_variant(module.modulname)
             if (not include_exams) and is_exam:
                 excluded_exam_rows += 1
                 continue
-            if row_forced_selection is not None:
-                default_selected = module_id in row_forced_selection
-            else:
-                default_selected = module_id in selected_row_ids_prev_all
-            rows.append(_module_to_row(module, module_id, default_selected))
+            rows.append(_module_to_row(module, module_id))
+            row_ids_in_order.append(module_id)
 
         if excluded_exam_rows:
             st.caption(t("guided.exams_hidden_caption", count=excluded_exam_rows))
 
         df_choice = pd.DataFrame(rows)
-        # See the identical caption/comment at the "module" mode's
-        # data_editor above - same underlying cause, same table type.
-        st.caption(t("guided.checkbox_click_hint"))
-        edited = st.data_editor(
+        row_desired_ids = set(row_forced_selection) if row_forced_selection is not None else selected_row_ids_prev_all
+        checked_now = _dataframe_row_selection(
             df_choice,
+            row_ids_in_order,
+            row_desired_ids,
+            df_key=f"course_selector_df_{row_version}",
             hide_index=True,
             width="stretch",
-            disabled=[
-                c("id"),
-                c("module_no"),
-                c("course_no"),
-                c("module"),
-                c("weekday"),
-                c("date"),
-                c("start"),
-                c("end"),
-                c("exam"),
-                c("type"),
-                c("lecturers"),
-                c("ects"),
-                c("source"),
-            ],
             column_config={
-                c("select"): st.column_config.CheckboxColumn(c("select")),
                 # Explicit typed columns instead of leaving these as plain
                 # text: consistent locale-aware formatting, right-alignment
                 # for the numeric column, and a narrower default width than
@@ -4601,13 +4692,11 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 c("end"): st.column_config.TimeColumn(c("end"), format="HH:mm", width="small"),
                 c("ects"): st.column_config.NumberColumn(c("ects"), width="small"),
             },
-            key=f"course_selector_editor_{row_version}",
         )
 
         # Merge rather than overwrite (see "module"/"course" mode's identical
         # fix above): a row not currently visible in this table keeps
         # whatever selection state it had before.
-        checked_now = set(edited.loc[edited[c("select")] == True, c("id")].tolist())
         visible_ids = set(idx for idx, _ in filtered_with_ids)
         selected_ids = (selected_row_ids_prev_all - visible_ids) | checked_now
         st.session_state.selected_row_ids = sorted(selected_ids)

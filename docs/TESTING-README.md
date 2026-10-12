@@ -309,10 +309,16 @@ reloading the table - a timing/race condition inherent to committing a
 `data_editor` edit via a rerun, not something this app's code controls.
 Addressed with an in-UI hint (`guided.checkbox_click_hint`, shown directly
 above all three selection tables) telling students to wait for the table
-to finish reloading between clicks, rather than a structural rewrite - see
-the "module_group_selector_editor" comments in `src/app.py` if a more
-robust fix (real per-row `st.checkbox()` widgets instead of a
-`CheckboxColumn` grid) is ever revisited.
+to finish reloading between clicks, rather than a structural rewrite at
+the time.
+
+**Update, 2026-10-12: the structural rewrite happened after all.** See the
+dedicated section below ("Replacing `st.data_editor`/`CheckboxColumn` with
+native row selection") - all three tables now use `st.dataframe`'s own
+`on_select`/`selection_mode` instead of a `CheckboxColumn` grid, which does
+not have this race condition at all (confirmed live: three rapid
+sequential clicks across different rows all registered correctly). The
+`guided.checkbox_click_hint` i18n key and its captions were removed.
 
 A later addition in the same vein, but a rare case where the interesting
 logic could actually live in `src/scheduler.py` instead of `src/app.py`:
@@ -504,6 +510,79 @@ it's easy to over-generalize the first fix's lesson incorrectly:
   item removal). Getting this placement decision right needs an actual
   live Playwright repro each time, not just a plausible-sounding analogy
   to the last fix - demonstrated twice now within the same work session.
+
+## Replacing `st.data_editor`/`CheckboxColumn` with native row selection
+
+A later 2026-10-12 round (point 3 of the same research-backed filter/
+selection improvement list) addressed the structural issue behind the
+checkbox-reliability bug documented above: all three guided-planning
+selection tables ("module"/"course"/"row" mode) were migrated from
+`st.data_editor` with a `CheckboxColumn` to a natively row-selectable
+`st.dataframe(..., on_select="rerun", selection_mode="multi-row")`
+(available since Streamlit 1.35). The new shared helper
+`_dataframe_row_selection()` in `src/app.py` replaces the per-mode
+`c("select")` checkbox column entirely; `guided.checkbox_click_hint` and
+its captions were removed as no longer applicable.
+
+Live Playwright verification confirmed the actual goal: three rapid
+sequential clicks across different rows (no waiting between them, the
+exact scenario that used to lose a selection) all registered correctly
+every time, in all three modes, and the existing filter-persistence
+behavior (a selection surviving a filter that temporarily hides it)
+continued to work unchanged. Getting there took two more real, live-
+reproduced bugs - neither visible from code review alone, both only found
+by actually clicking through the running app:
+
+1. **An external change to the selection (not a click in the table
+   itself) wasn't picked up.** `st.dataframe`'s row selection is tracked
+   purely by POSITION in the dataframe passed to that exact call, with no
+   automatic reconciliation against anything else - unlike `st.data_editor`,
+   which (it turned out, in hindsight) was effectively diffing its
+   displayed VALUES against user edits each rerun, which is why the old
+   `c("select")`-column approach picked up e.g. a "✕" click from the
+   selected-items removal list "for free" without any special handling.
+   The first version of the native-selection helper only reseeded the
+   widget's stored selection when the VISIBLE ROW SET changed (a filter
+   changing); it did not notice when `selected_course_bases`/
+   `selected_row_ids` changed for some OTHER reason while the row set
+   stayed the same. Confirmed live: select all 6 modules, remove one via
+   the "Deine aktuelle Auswahl" list - the match count correctly dropped
+   from 62 to 52 Termine, but the table checkboxes and the "🔍 Filter
+   (N aktiv)"-adjacent state were still showing all 6 as checked. Fixed
+   by including the DESIRED selection itself (not just the visible row
+   keys) in the signature that decides whether to reseed.
+2. **That fix immediately broke consecutive clicks within the SAME
+   table.** Confirmed live: clicking two different rows in quick
+   succession only kept the second click; the first one's selection
+   silently reverted. Root cause: the "desired selection" used for the
+   reseed-decision is computed by the caller from `selected_course_bases`/
+   `selected_row_ids` BEFORE calling the helper, and the caller only
+   writes the updated value back AFTER the helper returns - so on every
+   subsequent render that value is naturally "one click behind" whatever
+   the table itself just achieved, even with nothing external involved.
+   Comparing against that stale value kept finding a "mismatch" and
+   reseeding the table back to the previous click's result, discarding
+   the new one. Fixed by recording the comparison signature from what the
+   call actually ACHIEVED (the selection it's about to return to the
+   caller) rather than from the "desired" value it was given going in -
+   see `_dataframe_row_selection()`'s own docstring for the full
+   before/after reasoning, worth reading before touching this function
+   again.
+
+A separate, useful lesson from building the Playwright checks for this:
+`page.wait_for_load_state("networkidle")` plus a short fixed `time.sleep()`
+- the pattern used throughout this file's own verification scripts - is
+not reliable for a heavier Streamlit rerun (e.g. switching
+`selection_mode`, which rebuilds the whole grouped-modules structure).
+Streamlit reruns run over an already-open WebSocket, which "networkidle"
+doesn't track at all; a screenshot taken right after such a switch showed
+the just-clicked radio button already visually updated but the table
+below still showing the PREVIOUS mode's columns, because the script was
+still running (Streamlit's own "Stop" button, shown in the top-right
+toolbar during a run, was still visible at that exact moment). Waiting for
+that "Stop" button to disappear before proceeding is the reliable way to
+wait for a Streamlit rerun to actually finish in a Playwright check, not a
+fixed sleep.
 
 ## Adding new tests
 

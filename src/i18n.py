@@ -197,7 +197,6 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "guided.course_details_expander": "Details je Basiskurs anzeigen",
         "guided.course_details_caption": "Varianten: {variants} | Prüfungen: {exams}",
         "guided.exams_hidden_caption": "{count} Prüfungszeilen sind ausgeblendet (Checkbox oben aktivieren zum Einblenden).",
-        "guided.checkbox_click_hint": "💡 Bitte nach jedem Anklicken kurz warten, bis die Tabelle fertig neu geladen ist, bevor du das nächste Kästchen anklickst - sonst kann die vorherige Auswahl verloren gehen.",
 
         "dashboard.subheader": "📊 Semesterübersicht",
         "dashboard.no_modules": "Keine ausgewählten Termine. Nutze die geführte Planung für die Auswahl.",
@@ -587,7 +586,6 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "guided.course_details_expander": "Show details per base course",
         "guided.course_details_caption": "Variants: {variants} | Exams: {exams}",
         "guided.exams_hidden_caption": "{count} exam rows are hidden (enable the checkbox above to show them).",
-        "guided.checkbox_click_hint": "💡 Please wait for the table to finish reloading after each click before clicking the next checkbox - otherwise your previous selection can get lost.",
 
         "dashboard.subheader": "📊 Semester Overview",
         "dashboard.no_modules": "No selected items. Use guided planning to choose modules.",
@@ -977,7 +975,6 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "guided.course_details_expander": "Afficher les détails par cours de base",
         "guided.course_details_caption": "Variantes : {variants} | Examens : {exams}",
         "guided.exams_hidden_caption": "{count} lignes d'examen sont masquées (active la case ci-dessus pour les afficher).",
-        "guided.checkbox_click_hint": "💡 Merci d'attendre que le tableau ait fini de se recharger après chaque clic avant de cocher la case suivante - sinon la sélection précédente peut se perdre.",
 
         "dashboard.subheader": "📊 Vue d'ensemble du semestre",
         "dashboard.no_modules": "Aucun élément sélectionné. Utilise la planification guidée.",

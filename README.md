@@ -111,7 +111,7 @@ streamlit run src/app.py
 5. Im Tab "Konfliktanalyse" Kollisionen auflösen
 6. Export am Ende freischalten und als XLSX/ICS herunterladen
 
-**Tipp bei Schritt 2:** Jeder Klick auf ein Auswahl-Kästchen in den Kurslisten-Tabellen lädt die Seite kurz neu. Bitte jeweils kurz warten, bis das fertig ist, bevor das nächste Kästchen angeklickt wird - sonst kann die vorherige Auswahl verloren gehen (Hinweis dazu erscheint auch direkt über den Tabellen in der App).
+Die drei Auswahltabellen in Schritt 2 (Modulbasiert/Kursbasiert/"Alle Termine darstellen") nutzen eine native, per Einzelklick zuverlässige Zeilenauswahl (`st.dataframe` mit `on_select`/`selection_mode`, seit Streamlit 1.35) statt der früheren Checkbox-Spalte - der frühere Hinweis, nach jedem Klick kurz zu warten, entfällt damit (siehe docs/TESTING-README.md für die Vorgeschichte dieses Wechsels).
 
 Zusätzliche Einstellungen in der Sidebar bzw. im Dashboard:
 
