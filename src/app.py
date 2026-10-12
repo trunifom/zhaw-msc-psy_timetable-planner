@@ -2386,6 +2386,17 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
     return _apply_chart_theme(fig)
 
 
+_PRUEFUNGSEINSICHT_PATTERN = re.compile(r"pr(?:u|ue|ü)fungseinsicht", flags=re.IGNORECASE)
+
+
+def _is_pruefungseinsicht(module: Any) -> bool:
+    """True for an exam-review session ("Pruefungseinsicht"/"Prüfungseinsicht"):
+    detected by title text, the same way _split_course_variant() detects an
+    exam-variant suffix - there is no dedicated boolean field for this in
+    ZHAWModule, it's a real recurring title pattern in the ZHAW catalogs."""
+    return bool(_PRUEFUNGSEINSICHT_PATTERN.search(str(getattr(module, "modulname", "") or "")))
+
+
 def _module_short_code(module: Any) -> str:
     """Short label for one module tile (e.g. the guided-planning semester
     preview grid): the Modul-Nr when available (e.g. "AS1"), else a short
@@ -2425,16 +2436,33 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
     pattern. Weeks are grouped/ordered by the ACTUAL MONDAY DATE of their
     ISO calendar week, not the raw ISO week number - the autumn semester
     (HS) runs across a calendar-year boundary, where ISO week numbers wrap
-    52/53 -> 1, which would sort incorrectly if used directly.
+    52/53 -> 1, which would sort incorrectly if used directly. Weeks are
+    shown top-to-bottom in ascending chronological order (earliest/current
+    week at the top, running down towards the semester's end) - Plotly's
+    default category-axis order already places the first `category_orders`
+    entry at the top for a non-reversed y-axis, so no `autorange="reversed"`
+    is applied here (empirically verified: reversing it put the LATEST week
+    at the top instead, which is what prompted this fix).
 
-    Returns (figure_or_None, excluded_undated_count).
+    Returns (figure_or_None, excluded_undated_count, excluded_pruefungseinsicht_count).
     """
     selected_ids = {id(m) for m in selected_modules}
     weekday_order = _weekday_labels_in_order()
 
     rows = []
     excluded_undated = 0
+    excluded_pruefungseinsicht = 0
     for module in all_modules:
+        if _is_pruefungseinsicht(module):
+            # Exam-review ("Pruefungseinsicht") sessions are often published
+            # as isolated outlier dates far outside the regular semester
+            # cadence (e.g. before teaching even starts) and are irrelevant
+            # for planning a semester's course load - they clutter this
+            # specific preview without adding planning value, so they are
+            # excluded here only (not from selection, exports, or any other
+            # tab/view).
+            excluded_pruefungseinsicht += 1
+            continue
         datum_value = getattr(module, "datum", None)
         if datum_value is None:
             excluded_undated += 1
@@ -2458,7 +2486,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         )
 
     if not rows:
-        return None, excluded_undated
+        return None, excluded_undated, excluded_pruefungseinsicht
 
     df = pd.DataFrame(rows)
     ordered_weeks = (
@@ -2489,7 +2517,6 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         textposition="middle center",
         textfont=dict(size=10, color="white"),
     )
-    fig.update_yaxes(autorange="reversed")
     fig.update_layout(
         height=max(420, 42 * len(ordered_weeks) + 120),
         margin=dict(l=10, r=10, t=30, b=10),
@@ -2497,7 +2524,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         yaxis_title="",
         legend_title_text="",
     )
-    return _apply_chart_theme(fig), excluded_undated
+    return _apply_chart_theme(fig), excluded_undated, excluded_pruefungseinsicht
 
 
 def _render_semester_preview_grid(all_modules: List[Any], selected_modules: List[Any]) -> None:
@@ -2508,7 +2535,9 @@ def _render_semester_preview_grid(all_modules: List[Any], selected_modules: List
     only to keep that already-very-long function's final section short.
     """
     st.caption(t("guided.step3_preview_caption"))
-    fig, excluded_undated = _semester_grid_figure(all_modules, selected_modules, color_sequence=_chart_palettes()["default"])
+    fig, excluded_undated, excluded_pruefungseinsicht = _semester_grid_figure(
+        all_modules, selected_modules, color_sequence=_chart_palettes()["default"]
+    )
     if fig is None:
         st.info(t("guided.step3_preview_no_dates"))
         return
@@ -2516,6 +2545,8 @@ def _render_semester_preview_grid(all_modules: List[Any], selected_modules: List
     st.plotly_chart(fig, use_container_width=True)
     if excluded_undated:
         st.caption(t("guided.step3_preview_excluded_caption", count=excluded_undated))
+    if excluded_pruefungseinsicht:
+        st.caption(t("guided.step3_preview_excluded_pruefungseinsicht_caption", count=excluded_pruefungseinsicht))
 
 
 def _daily_load_figure(modules: List[Any], color_sequence: list[str] | None = None, split_by_module: bool = False):
