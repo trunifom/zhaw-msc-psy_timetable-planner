@@ -262,7 +262,7 @@ Streamlit-Forum-Thread zu eingeklappter Mobile-Sidebar (discuss.streamlit.io).
 
 ### 6. Export als eigenen, sichtbaren Abschluss-Schritt statt Sidebar-Anhängsel
 
-**Status:** ✅ Erledigt am 2026-10-13, 14:45 (Commit `<wird nach Commit ergänzt>`)
+**Status:** ✅ Erledigt am 2026-10-13, 14:45 (Commit `4584af8b`)
 
 **Umsetzung:** Der Export-Bereich erscheint jetzt standardmässig als eigene, gut sichtbare
 "4 Exportieren"-Karte im Hauptbereich, direkt nach den Ergebnis-Tabs — statt unterhalb der
