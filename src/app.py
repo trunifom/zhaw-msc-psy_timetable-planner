@@ -2626,6 +2626,120 @@ def _semester_heatmap_figure(modules: List[Any], conflict_dates: set | None = No
     return _apply_chart_theme(fig)
 
 
+def _semester_week_groups(modules: List[Any], conflict_dates: set | None = None) -> list[dict[str, Any]]:
+    """
+    Group dated modules by calendar week (Monday-first), the data behind
+    the third "whole semester" view alternative to _semester_timeline_
+    figure()/_semester_heatmap_figure(): a drill-down list the student
+    expands week by week instead of reading a chart (see
+    docs/UX-OPTIMIERUNGEN-README.md Punkt 3's second, originally-still-open
+    sub-point). Pure data-shaping, no Streamlit calls, so - unlike the
+    rendering half in _render_semester_week_list() - this is unit-testable
+    the same way _semester_grid_figure() already is in this project.
+
+    Weeks are ordered chronologically by their actual Monday date, not the
+    raw ISO week number - the same year-boundary-wraparound reasoning
+    documented on _semester_grid_figure() (the HS semester crosses a
+    calendar-year boundary, where ISO week numbers wrap 52/53 -> 1).
+    Undated rows (no `datum`) are skipped - there is no single calendar
+    week to place them in (this app's core domain premise, see
+    models.py's module docstring).
+
+    Each returned dict has: "week_monday" (date, for stable sorting by the
+    caller), "label" (e.g. "KW 38 (14.09. - 20.09.)"), "sessions" (list of
+    per-session dicts, sorted by date then start time, each already using
+    c()-translated column-style keys so a caller can build a DataFrame
+    directly), "session_count", and "conflict_count" (number of distinct
+    dates within the week that are in `conflict_dates`, not number of
+    conflicting sessions - two sessions conflicting on the same date count
+    as one conflict day here, matching how the heatmap counts/marks days).
+    """
+    conflict_dates = conflict_dates or set()
+    weeks: dict[date, dict[str, Any]] = {}
+    for module in modules:
+        datum_value = getattr(module, "datum", None)
+        if datum_value is None:
+            continue
+        week_monday = datum_value - timedelta(days=datum_value.weekday())
+        iso = datum_value.isocalendar()
+        is_conflict = datum_value in conflict_dates
+        week = weeks.setdefault(
+            week_monday,
+            {
+                "week_monday": week_monday,
+                "label": f"KW {iso.week} ({week_monday.strftime('%d.%m.')} - {(week_monday + timedelta(days=6)).strftime('%d.%m.')})",
+                "sessions": [],
+                "_conflict_dates": set(),
+            },
+        )
+        week["sessions"].append(
+            {
+                c("date"): datum_value,
+                c("weekday"): _weekday_label(module),
+                c("start"): module.startzeit.strftime("%H:%M"),
+                c("end"): module.endzeit.strftime("%H:%M"),
+                c("module"): _module_label(module),
+                c("room"): module.raum,
+                c("exam"): t("guided.yes") if getattr(module, "ist_pruefung", False) else t("guided.no"),
+                c("conflict"): t("dashboard.week_list.conflict_marker") if is_conflict else "",
+            }
+        )
+        if is_conflict:
+            week["_conflict_dates"].add(datum_value)
+
+    ordered = sorted(weeks.values(), key=lambda w: w["week_monday"])
+    for week in ordered:
+        week["sessions"].sort(key=lambda row: (row[c("date")], row[c("start")]))
+        week["session_count"] = len(week["sessions"])
+        week["conflict_count"] = len(week.pop("_conflict_dates"))
+    return ordered
+
+
+def _render_semester_week_list(modules: List[Any], conflict_dates: set | None = None) -> None:
+    """
+    Render the "grouped by calendar week" drill-down alternative to the
+    semester scatter/heatmap charts (see _semester_week_groups() for the
+    underlying data and docs/UX-OPTIMIERUNGEN-README.md Punkt 3): one
+    st.expander per week ("KW 38 (14.09. - 20.09.) - 3 Termine", or
+    "... - 3 Termine, 1 Konflikt" when that week has one), auto-expanded
+    only for a week that actually contains a conflict - "overview first,
+    details on demand" (Shneiderman's information-seeking mantra), the
+    same progressive-disclosure pattern this app already uses for the
+    Wochenplan tab's per-weekday expanders.
+
+    Reuses _style_absence_rows() (an existing, generic "tint this row red
+    if this column's text is non-empty" styler - see that function's
+    docstring) against the new c("conflict") column instead of writing a
+    second, near-identical styling helper just for this table.
+    """
+    weeks = _semester_week_groups(modules, conflict_dates=conflict_dates)
+    if not weeks:
+        st.info(t("dashboard.chart.no_dated_rows"))
+        return
+
+    for week in weeks:
+        if week["conflict_count"]:
+            header = t(
+                "dashboard.week_list.header_conflict",
+                label=week["label"],
+                count=week["session_count"],
+                conflicts=week["conflict_count"],
+            )
+        else:
+            header = t("dashboard.week_list.header", label=week["label"], count=week["session_count"])
+
+        with st.expander(header, expanded=bool(week["conflict_count"])):
+            df = pd.DataFrame(week["sessions"])
+            st.dataframe(
+                _style_absence_rows(df, c("conflict")),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    c("date"): st.column_config.DateColumn(c("date"), format="DD.MM.YYYY", width="small"),
+                },
+            )
+
+
 _PRUEFUNGSEINSICHT_PATTERN = re.compile(r"pr(?:u|ue|ü)fungseinsicht", flags=re.IGNORECASE)
 
 
@@ -5558,7 +5672,7 @@ def render_dashboard(modules: List) -> None:
                     (t("chart.color_by_module"), "module"),
                     (t("chart.color_by_type"), "type"),
                 ],
-                # "heatmap" is the new week x weekday calendar view (docs/
+                # "heatmap"/"list" are the two new week-centric views (docs/
                 # UX-OPTIMIERUNGEN-README.md Punkt 3); "scatter" is the
                 # original _semester_timeline_figure() view, kept available
                 # side by side at the user's explicit request for
@@ -5566,27 +5680,36 @@ def render_dashboard(modules: List) -> None:
                 "view_mode": [
                     (t("chart.view_mode_scatter"), "scatter"),
                     (t("chart.view_mode_heatmap"), "heatmap"),
+                    (t("chart.view_mode_list"), "list"),
                 ],
             },
         )
-        if timeline_choices.get("view_mode", "scatter") == "heatmap":
+        timeline_view_mode = timeline_choices.get("view_mode", "scatter")
+        if timeline_view_mode in ("heatmap", "list"):
             # Conflicts are recomputed from timeline_modules (the
-            # weekday-filtered view this chart actually renders), not the
-            # tab's full `modules`/`conflict_pairs` - a conflict whose
+            # weekday-filtered view these two views actually render), not
+            # the tab's full `modules`/`conflict_pairs` - a conflict whose
             # partner session was just filtered out of view shouldn't
-            # still show a warning glyph on this chart.
+            # still show a warning glyph/marker here.
             timeline_conflict_dates = {
                 m.datum for pair in find_time_conflicts(timeline_modules) for m in pair if getattr(m, "datum", None) is not None
             }
+        if timeline_view_mode == "heatmap":
             semester_timeline = _semester_heatmap_figure(timeline_modules, conflict_dates=timeline_conflict_dates)
+            if semester_timeline is not None:
+                st.plotly_chart(semester_timeline, use_container_width=True)
+            else:
+                st.info(t("dashboard.chart.no_dated_rows"))
+        elif timeline_view_mode == "list":
+            _render_semester_week_list(timeline_modules, conflict_dates=timeline_conflict_dates)
         else:
             semester_timeline = _semester_timeline_figure(
                 timeline_modules, color_sequence=timeline_palette, color_by=timeline_choices.get("color_by", "module")
             )
-        if semester_timeline is not None:
-            st.plotly_chart(semester_timeline, use_container_width=True)
-        else:
-            st.info(t("dashboard.chart.no_dated_rows"))
+            if semester_timeline is not None:
+                st.plotly_chart(semester_timeline, use_container_width=True)
+            else:
+                st.info(t("dashboard.chart.no_dated_rows"))
 
         st.divider()
         st.markdown(t("dashboard.section.daily_load"))

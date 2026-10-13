@@ -397,3 +397,92 @@ def test_overlap_summary_chart_label_matches_short_modul_nr_unchanged():
     m = make_module(modulname="Kurs", modul_nr="AS1")
     summary = app._calculate_module_overlap_summary([m])
     assert summary.iloc[0]["_chart_label"] == "AS1"
+
+
+# --- _semester_week_groups: the "list (by week)" drill-down's data -------
+#
+# The rendering half (_render_semester_week_list) is st.*-based UI and,
+# per this project's policy (see module docstring), is verified manually/
+# via Playwright instead - these tests cover only the pure data-shaping
+# function behind it (docs/UX-OPTIMIERUNGEN-README.md Punkt 3's second,
+# originally-still-open sub-point).
+
+def test_semester_week_groups_orders_weeks_by_actual_monday_date_not_raw_iso_week():
+    # Same year-boundary-wraparound bug class _semester_grid_figure() was
+    # already fixed for (see that function's own test) - a semester
+    # spanning a calendar-year boundary has an early session in ISO week
+    # 38 of 2026 and a later one in ISO week 1 of 2027; naive sorting by
+    # raw week number alone would put "week 1" before "week 38".
+    early = make_module(modulname="Fruehes Modul", datum=date(2026, 9, 14), wochentag="montag")
+    late = make_module(modulname="Spaetes Modul", datum=date(2027, 1, 4), wochentag="montag")
+    weeks = app._semester_week_groups([late, early])
+    assert [w["week_monday"] for w in weeks] == [date(2026, 9, 14), date(2027, 1, 4)]
+
+
+def test_semester_week_groups_skips_undated_rows():
+    dated = make_module(modulname="Mit Datum", datum=date(2026, 9, 14))
+    undated = make_module(modulname="Ohne Datum", datum=None)
+    weeks = app._semester_week_groups([dated, undated])
+    assert len(weeks) == 1
+    assert weeks[0]["session_count"] == 1
+
+
+def test_semester_week_groups_returns_empty_list_when_everything_is_undated():
+    undated = make_module(modulname="Ohne Datum", datum=None)
+    assert app._semester_week_groups([undated]) == []
+
+
+def test_semester_week_groups_counts_sessions_and_distinct_conflict_dates():
+    # Two sessions in the same week, only one of their two distinct dates
+    # is in `conflict_dates` - conflict_count must reflect DISTINCT
+    # conflicting dates in the week (matching how the heatmap view counts/
+    # marks conflict days), not the number of sessions.
+    tue = make_module(modulname="Dienstag-Kurs", datum=date(2026, 9, 15), wochentag="dienstag")
+    wed = make_module(modulname="Mittwoch-Kurs", datum=date(2026, 9, 16), wochentag="mittwoch")
+    weeks = app._semester_week_groups([tue, wed], conflict_dates={date(2026, 9, 15)})
+    assert len(weeks) == 1
+    week = weeks[0]
+    assert week["session_count"] == 2
+    assert week["conflict_count"] == 1
+
+    sessions_by_module = {row[app.c("module")]: row for row in week["sessions"]}
+    tue_row = next(row for name, row in sessions_by_module.items() if "Dienstag" in name)
+    wed_row = next(row for name, row in sessions_by_module.items() if "Mittwoch" in name)
+    assert tue_row[app.c("conflict")] != ""
+    assert wed_row[app.c("conflict")] == ""
+
+
+def test_semester_week_groups_sessions_sorted_by_date_then_start_time():
+    later_day = make_module(
+        modulname="Spaeter im Verlauf", datum=date(2026, 9, 16), wochentag="mittwoch", startzeit=time(8, 0), endzeit=time(10, 0)
+    )
+    earlier_day_later_time = make_module(
+        modulname="Fruehere im Verlauf, spaeter am Tag",
+        datum=date(2026, 9, 15),
+        wochentag="dienstag",
+        startzeit=time(14, 0),
+        endzeit=time(16, 0),
+    )
+    earlier_day_earlier_time = make_module(
+        modulname="Fruehester Termin der Woche",
+        datum=date(2026, 9, 15),
+        wochentag="dienstag",
+        startzeit=time(8, 15),
+        endzeit=time(10, 0),
+    )
+    weeks = app._semester_week_groups([later_day, earlier_day_later_time, earlier_day_earlier_time])
+    assert len(weeks) == 1
+    ordered_names = [row[app.c("module")] for row in weeks[0]["sessions"]]
+    assert ordered_names == [
+        "Fruehester Termin der Woche",
+        "Fruehere im Verlauf, spaeter am Tag",
+        "Spaeter im Verlauf",
+    ]
+
+
+def test_semester_week_groups_label_contains_iso_week_and_date_range():
+    m = make_module(modulname="Kurs", datum=date(2026, 9, 15), wochentag="dienstag")
+    week = app._semester_week_groups([m])[0]
+    assert "KW 38" in week["label"]
+    assert "14.09." in week["label"]  # the week's Monday
+    assert "20.09." in week["label"]  # the week's Sunday
