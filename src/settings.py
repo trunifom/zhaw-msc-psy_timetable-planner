@@ -104,3 +104,26 @@ README.md's "Zusatzempfehlung B" (NN/g: users treat dark mode as a
 system-wide setting they expect apps to respect, not something to
 re-toggle per app).
 """
+
+ChartTitleStyle = Literal["label", "headline"]
+
+CHART_TITLE_STYLE: ChartTitleStyle = "headline"
+"""
+How the Dashboard's four chart/section headings (Wochentagsverteilung,
+Top-Überlappungen, Semesterübersicht, Gesamte Vorlesungsdauer) are worded:
+- "label": the original, static, descriptive heading (e.g. "Top-
+  Überlappungen pro Modul") - what the section IS.
+- "headline" (default): a data-driven one-line takeaway computed for the
+  student's CURRENT selection (e.g. "Grösste Überlappung: AS1 (45 Min.)")
+  - what the section's data actually SAYS, following "Storytelling with
+  Data"/Evergreen's "active title" practice and the GOV.UK Analysis
+  Function's "headline + subtitle" chart guidance (docs/UX-OPTIMIERUNGEN-
+  README.md, Zusatzempfehlung C). Falls back to the static "label" wording
+  automatically whenever no takeaway can be computed yet (e.g. nothing
+  dated in the current selection), so a heading never goes blank.
+
+The exact wording for each chart's headline lives in `src/i18n.py` under
+the `dashboard.chart.*_headline` keys (one per language) - edit the
+TEMPLATE TEXT there; this flag only switches which wording style is used,
+it does not need touching to tweak phrasing.
+"""

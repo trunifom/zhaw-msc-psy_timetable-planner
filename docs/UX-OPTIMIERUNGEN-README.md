@@ -354,11 +354,20 @@ unabhängig von der Browser-Präferenz.
 
 ### C. Chart-Titel als Aussage statt Label
 
-**Status:** ⬜ Offen
+**Status:** ✅ Erledigt am 2026-10-13, 12:40 (Commit `<wird nach Commit ergänzt>`)
 
-"Dienstag ist dein vollster Tag (3 Veranstaltungen)" statt "Wochenplan" — bereits teilweise
-als Dashboard-Insight-Caption umgesetzt (`_busiest_weekday()`, siehe `ux-clarity-patterns`-
-Memory), auf alle übrigen Charts konsequent ausweiten.
+**Umsetzung:** Alle vier Dashboard-Chart-/Abschnittsüberschriften (Wochentagsverteilung,
+Top-Überlappungen, Semesterübersicht, Gesamte Vorlesungsdauer) zeigen jetzt standardmässig
+eine datengetriebene Aussage statt eines neutralen Labels — z.B. "📌 Dienstag ist dein
+dichtester Tag (2 Termine)" statt "Verteilung nach Wochentagen". Per neuem Flag
+`settings.CHART_TITLE_STYLE` (`"label" | "headline"`, Default `"headline"`) umschaltbar; der
+genaue Wortlaut jeder Headline liegt als normaler i18n-Text in `src/i18n.py`
+(`dashboard.chart.*_headline`-Keys) und ist dort unabhängig vom Flag anpassbar — siehe
+`docs/SETTINGS-README.md`.
+
+Verifiziert: `py_compile` + `pytest -q` (273/273 grün, 11 neue Tests für die Umschalt-Logik
+und die vier Headline-Helfer) im korrekten Conda-Env, sowie Live-Test per Playwright mit
+echtem Konfliktszenario — alle vier Überschriften zeigen die korrekt berechnete Aussage.
 
 **Quellen:** GOV.UK Analysis Function "Data visualisation: charts"
 (analysisfunction.civilservice.gov.uk/policy-store/data-visualisation-charts), Storytelling

@@ -399,6 +399,87 @@ def test_overlap_summary_chart_label_matches_short_modul_nr_unchanged():
     assert summary.iloc[0]["_chart_label"] == "AS1"
 
 
+# --- _chart_section_title / *_headline: settings.CHART_TITLE_STYLE -------
+#
+# Implements docs/UX-OPTIMIERUNGEN-README.md's Zusatzempfehlung C. Only the
+# pure headline-computation helpers and the style switch itself are tested
+# here; the st.markdown() render call sites in render_dashboard() are UI,
+# not covered per this module's own docstring/policy.
+
+def test_chart_section_title_label_mode_ignores_headline(monkeypatch):
+    monkeypatch.setattr(app.settings, "CHART_TITLE_STYLE", "label")
+    assert app._chart_section_title("dashboard.chart.weekday_title", "Some headline") == app.t(
+        "dashboard.chart.weekday_title"
+    )
+
+
+def test_chart_section_title_headline_mode_uses_headline_when_present(monkeypatch):
+    monkeypatch.setattr(app.settings, "CHART_TITLE_STYLE", "headline")
+    assert app._chart_section_title("dashboard.chart.weekday_title", "**Some headline**") == "**Some headline**"
+
+
+def test_chart_section_title_headline_mode_falls_back_without_headline(monkeypatch):
+    # No data to summarize yet (headline is None) - must never go blank.
+    monkeypatch.setattr(app.settings, "CHART_TITLE_STYLE", "headline")
+    assert app._chart_section_title("dashboard.chart.weekday_title", None) == app.t("dashboard.chart.weekday_title")
+
+
+def test_weekday_distribution_headline_matches_busiest_weekday():
+    m1 = make_module(modulname="Kurs A", wochentag="dienstag")
+    m2 = make_module(modulname="Kurs B", wochentag="dienstag", startzeit=time(14, 0), endzeit=time(16, 0))
+    m3 = make_module(modulname="Kurs C", wochentag="montag")
+    headline = app._weekday_distribution_headline([m1, m2, m3])
+    assert headline == app.t("dashboard.chart.weekday_headline", day=app.t("weekday.dienstag"), count=2)
+
+
+def test_weekday_distribution_headline_none_for_empty_list():
+    assert app._weekday_distribution_headline([]) is None
+
+
+def test_overlap_headline_none_for_empty_summary():
+    assert app._overlap_headline(app._calculate_module_overlap_summary([])) is None
+
+
+def test_overlap_headline_names_top_overlapping_course():
+    a = make_module(modulname="Kurs A", modul_nr="AS1", wochentag="montag", startzeit=time(8, 15), endzeit=time(10, 0))
+    b = make_module(modulname="Kurs B", modul_nr="BS1", wochentag="montag", startzeit=time(9, 0), endzeit=time(10, 30))
+    summary = app._calculate_module_overlap_summary([a, b])
+    headline = app._overlap_headline(summary)
+    top_label = summary.iloc[0]["_chart_label"]
+    top_minutes = int(summary.iloc[0][app.c("overlap_total_min")])
+    assert headline == app.t("dashboard.chart.overlap_headline", course=top_label, minutes=top_minutes)
+
+
+def test_semester_timeline_headline_names_busiest_week():
+    tue = make_module(modulname="Dienstag-Kurs", datum=date(2026, 9, 15), wochentag="dienstag")
+    wed = make_module(modulname="Mittwoch-Kurs", datum=date(2026, 9, 16), wochentag="mittwoch")
+    other_wed = make_module(
+        modulname="Noch ein Mittwoch-Kurs", datum=date(2026, 9, 16), wochentag="mittwoch", startzeit=time(14, 0), endzeit=time(16, 0)
+    )
+    headline = app._semester_timeline_headline([tue, wed, other_wed])
+    weeks = app._semester_week_groups([tue, wed, other_wed])
+    busiest = max(weeks, key=lambda week: week["session_count"])
+    assert headline == app.t("dashboard.chart.semester_headline", label=busiest["label"], count=busiest["session_count"])
+
+
+def test_semester_timeline_headline_none_without_dated_rows():
+    undated = make_module(modulname="Ohne Datum", datum=None)
+    assert app._semester_timeline_headline([undated]) is None
+
+
+def test_daily_load_headline_names_busiest_date():
+    short = make_module(modulname="Kurz", datum=date(2026, 9, 15), startzeit=time(8, 0), endzeit=time(9, 0))
+    long_a = make_module(modulname="Lang A", datum=date(2026, 9, 16), startzeit=time(8, 0), endzeit=time(11, 0))
+    long_b = make_module(modulname="Lang B", datum=date(2026, 9, 16), startzeit=time(13, 0), endzeit=time(14, 0))
+    headline = app._daily_load_headline([short, long_a, long_b])
+    assert headline == app.t("dashboard.chart.daily_load_headline", date="16.09.2026", minutes=240)
+
+
+def test_daily_load_headline_none_without_dated_rows():
+    undated = make_module(modulname="Ohne Datum", datum=None)
+    assert app._daily_load_headline([undated]) is None
+
+
 # --- _semester_week_groups: the "list (by week)" drill-down's data -------
 #
 # The rendering half (_render_semester_week_list) is st.*-based UI and,

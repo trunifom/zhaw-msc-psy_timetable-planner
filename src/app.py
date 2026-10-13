@@ -3620,6 +3620,80 @@ def _busiest_weekday(modules: List[Any]) -> tuple[str | None, int]:
     return busiest, counts[busiest]
 
 
+def _chart_section_title(label_key: str, headline: str | None) -> str:
+    """
+    Resolve one of the Dashboard's chart/section headings per settings.
+    CHART_TITLE_STYLE ("label" or "headline" - see src/settings.py for the
+    full rationale; implements docs/UX-OPTIMIERUNGEN-README.md's
+    Zusatzempfehlung C): the original, static, translated label (`t(
+    label_key)`) in "label" mode, or - in "headline" mode - a data-driven
+    one-line takeaway computed for the CURRENT data instead (e.g. "Grösste
+    Überlappung: AS1 (45 Min.)"), following "Storytelling with Data"/
+    Evergreen's "active title" practice. Always falls back to the static
+    label when `headline` is None (nothing to summarize yet, e.g. no dated
+    rows) or empty, so a heading never goes blank.
+    """
+    if settings.CHART_TITLE_STYLE == "headline" and headline:
+        return headline
+    return t(label_key)
+
+
+def _weekday_distribution_headline(modules: List[Any]) -> str | None:
+    """Headline variant of the weekday-distribution chart's section title
+    (see _chart_section_title()) - reuses _busiest_weekday() rather than
+    recomputing the same count a second time. Returns None when `modules`
+    is empty (nothing to summarize)."""
+    busiest_day, busiest_count = _busiest_weekday(modules)
+    if not busiest_day:
+        return None
+    return t("dashboard.chart.weekday_headline", day=busiest_day, count=busiest_count)
+
+
+def _overlap_headline(summary_df: pd.DataFrame) -> str | None:
+    """Headline variant of the overlap chart's section title (see
+    _chart_section_title()) - the single most-overlapping course, reusing
+    `summary_df`'s existing descending sort (see
+    _calculate_module_overlap_summary()) rather than re-sorting. Returns
+    None when `summary_df` is empty (no overlap at all)."""
+    if summary_df.empty:
+        return None
+    top = summary_df.iloc[0]
+    return t("dashboard.chart.overlap_headline", course=top["_chart_label"], minutes=int(top[c("overlap_total_min")]))
+
+
+def _semester_timeline_headline(modules: List[Any]) -> str | None:
+    """Headline variant of the semester-overview section title (see
+    _chart_section_title()) - the single busiest calendar week, reusing
+    _semester_week_groups() (shared with the "list (by week)" view) rather
+    than grouping by week a third time. Returns None when no row has a
+    date at all."""
+    weeks = _semester_week_groups(modules)
+    if not weeks:
+        return None
+    busiest = max(weeks, key=lambda week: week["session_count"])
+    return t("dashboard.chart.semester_headline", label=busiest["label"], count=busiest["session_count"])
+
+
+def _daily_load_headline(modules: List[Any]) -> str | None:
+    """Headline variant of the daily-load chart's section title (see
+    _chart_section_title()) - the single calendar date with the most total
+    scheduled minutes. Returns None when no row has a date at all."""
+    totals_by_date: dict[date, int] = {}
+    for module in modules:
+        datum_value = getattr(module, "datum", None)
+        if datum_value is None:
+            continue
+        totals_by_date[datum_value] = totals_by_date.get(datum_value, 0) + module.duration_minutes
+    if not totals_by_date:
+        return None
+    busiest_date = max(totals_by_date, key=totals_by_date.get)
+    return t(
+        "dashboard.chart.daily_load_headline",
+        date=busiest_date.strftime("%d.%m.%Y"),
+        minutes=totals_by_date[busiest_date],
+    )
+
+
 def _overlap_bar_figure(summary_df: pd.DataFrame, color_scale: str = "Reds"):
     """Horizontal bar chart of the top 12 most-overlapping COURSES (one row
     per course now that _calculate_module_overlap_summary aggregates at
@@ -5707,7 +5781,7 @@ def render_dashboard(modules: List) -> None:
     with card("dash-visuals", "📈", t("dashboard.section.visuals")):
         chart_col1, chart_col2 = st.columns([1.2, 1])
         with chart_col1:
-            st.markdown(t("dashboard.chart.weekday_title"))
+            st.markdown(_chart_section_title("dashboard.chart.weekday_title", _weekday_distribution_headline(modules)))
             st.caption(t("dashboard.chart.weekday_caption"))
             weekday_modules, weekday_palette, _ = _render_chart_toolbar(
                 "dash_weekday", modules, show_weekday_filter=True
@@ -5733,7 +5807,7 @@ def render_dashboard(modules: List) -> None:
                 # always explains itself instead of leaving a mysterious gap.
                 st.info(t("dashboard.chart.no_data"))
         with chart_col2:
-            st.markdown(t("dashboard.chart.overlap_title"))
+            st.markdown(_chart_section_title("dashboard.chart.overlap_title", _overlap_headline(overlap_summary)))
             st.caption(t("dashboard.chart.overlap_caption"))
             _, overlap_scale, _ = _render_chart_toolbar(
                 "dash_overlap", modules, continuous=True, show_weekday_filter=False
@@ -5745,7 +5819,7 @@ def render_dashboard(modules: List) -> None:
                 st.info(t("dashboard.chart.no_data"))
 
         st.divider()
-        st.markdown(t("dashboard.section.semester_timeline"))
+        st.markdown(_chart_section_title("dashboard.section.semester_timeline", _semester_timeline_headline(modules)))
         st.caption(t("dashboard.chart.semester_caption"))
         timeline_modules, timeline_palette, timeline_choices = _render_chart_toolbar(
             "dash_timeline",
@@ -5796,7 +5870,7 @@ def render_dashboard(modules: List) -> None:
                 st.info(t("dashboard.chart.no_dated_rows"))
 
         st.divider()
-        st.markdown(t("dashboard.section.daily_load"))
+        st.markdown(_chart_section_title("dashboard.section.daily_load", _daily_load_headline(modules)))
         st.caption(t("dashboard.chart.daily_load_caption"))
         load_modules, load_palette, load_choices = _render_chart_toolbar(
             "dash_load",

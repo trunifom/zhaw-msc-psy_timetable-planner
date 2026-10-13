@@ -35,6 +35,7 @@ allgemeines Konfigurationssystem.
 | `SHOW_RAW_DATA_TAB` | `bool` | `True` | Zeigt/versteckt den "🗄️ Rohdaten"-Tab komplett. |
 | `SHOW_EXTENDED_QUICKSTART` | `bool` | `True` | Zeigt Dauer/Voraussetzungen/Anmeldungs-Hinweis in der Schnellstart-Karte zusätzlich an. |
 | `DEFAULT_THEME` | `"light" \| "dark" \| "auto"` | `"auto"` | Start-Theme für neue Besucher:innen (Sidebar-Umschalter bleibt immer verfügbar). |
+| `CHART_TITLE_STYLE` | `"label" \| "headline"` | `"headline"` | Dashboard-Chart-Überschriften als neutrales Label oder als datengetriebene Aussage. |
 
 *(Diese Tabelle wächst mit jedem weiteren Flag - siehe die einzelnen
 Abschnitte unten für Details. Neue Einträge werden in dem Commit ergänzt,
@@ -142,3 +143,49 @@ Browser-Emulation bei `DEFAULT_THEME="auto"` - App startet jeweils im
 passenden Theme. Zusätzlich mit `DEFAULT_THEME="dark"` bei einem
 hell-präferierenden Browser - App startet trotzdem dunkel (fester Wert
 gewinnt über die Browser-Präferenz).
+
+---
+
+## `CHART_TITLE_STYLE`
+
+**Was:** Wie die vier Dashboard-Diagramm-/Abschnittsüberschriften
+(Wochentagsverteilung, Top-Überlappungen, Semesterübersicht, Gesamte
+Vorlesungsdauer) formuliert sind:
+
+- `"label"`: die ursprüngliche, statische, beschreibende Überschrift
+  (z.B. "Top-Überlappungen pro Modul") - was der Abschnitt IST.
+- `"headline"` (Default): eine datengetriebene Aussage für die aktuelle
+  Auswahl (z.B. "Grösste Überlappung: AS1 (45 Min.)") - was die Daten des
+  Abschnitts tatsächlich AUSSAGEN. Fällt automatisch auf die statische
+  Variante zurück, wenn (noch) keine Aussage berechnet werden kann (z.B.
+  keine datierten Termine).
+
+**Warum:** Folgt der "aktiver Titel statt beschreibendes Label"-Praxis
+(Storytelling with Data/Evergreen) sowie der GOV.UK Analysis
+Function-Empfehlung "Headline + Untertitel" für Diagramme (siehe
+`docs/UX-OPTIMIERUNGEN-README.md`, Zusatzempfehlung C).
+
+**Wortlaut einfach anpassbar:** Die genaue Formulierung jeder Headline
+liegt NICHT in diesem Flag, sondern als normaler, übersetzbarer Text in
+`src/i18n.py` unter den Keys `dashboard.chart.*_headline` (je einer pro
+Sprache, z.B. `dashboard.chart.weekday_headline`,
+`dashboard.chart.overlap_headline`, `dashboard.chart.semester_headline`,
+`dashboard.chart.daily_load_headline`). Nur der WORTLAUT dort muss
+angepasst werden, um den Text zu ändern - dieses Flag schaltet nur
+zwischen Label- und Headline-Stil um.
+
+**Code-Stelle:** `app._chart_section_title()` (die generische
+Umschalt-Logik) plus vier kleine, reine Helper-Funktionen, die je eine
+Headline aus den aktuellen Daten berechnen:
+`_weekday_distribution_headline()`, `_overlap_headline()`,
+`_semester_timeline_headline()`, `_daily_load_headline()`. Aufgerufen aus
+`render_dashboard()` an den vier `st.markdown(...)`-Überschriften-Stellen.
+
+**Tests:** `tests/test_app_helpers.py` - `test_chart_section_title_*` (die
+Umschalt-Logik selbst) sowie je 2 Tests pro Headline-Helper (korrekte
+Aussage berechnet / `None` ohne Daten).
+
+**Live verifiziert:** Playwright-Screenshot mit echtem
+Haupt+Zusatzmodule-Konfliktszenario - alle vier Überschriften zeigen
+korrekt die berechnete Aussage (z.B. "📌 Dienstag ist dein dichtester Tag
+(2 Termine)", "📌 Grösste Überlappung: KFH1 (90 Min.)").
