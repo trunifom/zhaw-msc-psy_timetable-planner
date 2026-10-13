@@ -354,7 +354,7 @@ unabhängig von der Browser-Präferenz.
 
 ### C. Chart-Titel als Aussage statt Label
 
-**Status:** ✅ Erledigt am 2026-10-13, 12:40 (Commit `<wird nach Commit ergänzt>`)
+**Status:** ✅ Erledigt am 2026-10-13, 12:40 (Commit `7992e0be`)
 
 **Umsetzung:** Alle vier Dashboard-Chart-/Abschnittsüberschriften (Wochentagsverteilung,
 Top-Überlappungen, Semesterübersicht, Gesamte Vorlesungsdauer) zeigen jetzt standardmässig
