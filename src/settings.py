@@ -167,3 +167,19 @@ way) is shown:
   in the sidebar - functionally identical, but easy to overlook given it's
   the actual goal of the whole tool.
 """
+
+# ==========================================
+# Onboarding / first screen (continued)
+# ==========================================
+
+QUICKSTART_DEFAULT_EXPANDED: bool = True
+"""
+Whether the "🚀 Schnellstart"-card at the very top of the app starts
+expanded (`True`, default) or collapsed (`False`). The card is an
+`st.expander`, so every visitor can collapse/expand it themselves at any
+time regardless of this setting - this flag only picks the state a brand-
+new session starts in (e.g. "always start collapsed so returning students
+aren't shown the same onboarding text every single visit" - set to
+`False` for that). See also SHOW_EXTENDED_QUICKSTART above, which
+controls how much text is INSIDE the card once it's open.
+"""

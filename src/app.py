@@ -5530,7 +5530,14 @@ def render_sidebar() -> None:
             )
             st.session_state.ui_theme = "dark" if dark_mode else "light"
 
-        with card("sidebar-data", "📁", t("sidebar.section.data")):
+        # Group label above both upload cards (requested directly - the two
+        # cards below used to follow "Darstellung" with no section break at
+        # all, reported as unclear/unintuitive). Plain bold text, not
+        # another st.header()/card() title, so it reads as "these two
+        # belong together" without competing with "⚙️ Steuerung" above it.
+        st.markdown(f"##### {t('sidebar.section.uploads')}")
+
+        with card("sidebar-data", "📚", t("sidebar.section.data")):
             st.caption(t("sidebar.data_description"))
 
             # Explicit `key=` (not just relying on Streamlit's auto-generated
@@ -5599,7 +5606,7 @@ def render_sidebar() -> None:
                 # right back, silently undermining this "full reset".
                 st.session_state.zusatz_uploader_version += 1
 
-        with card("sidebar-data-zusatz", "🎓", t("sidebar.section.zusatzmodule")):
+        with card("sidebar-data-zusatz", "🌉", t("sidebar.section.zusatzmodule")):
             st.caption(t("sidebar.zusatzmodule.description"))
 
             uploaded_file_zusatz = st.file_uploader(
@@ -6621,7 +6628,13 @@ def main() -> None:
     with header_col_lang:
         _render_header_language_switcher()
 
-    with card("app-quickstart", "🚀", t("app.quickstart_title")):
+    # An st.expander (not card()) specifically so every visitor can collapse
+    # this themselves once they've read it, instead of it permanently taking
+    # up space - "Ein-/Ausblenden" requested directly, not just a settings.py
+    # toggle. settings.QUICKSTART_DEFAULT_EXPANDED only picks the state a
+    # brand-new session starts in (see that flag's docstring); st.expander is
+    # already themed for both light/dark (see _inject_design_system_css()).
+    with st.expander(f"🚀 {t('app.quickstart_title')}", expanded=settings.QUICKSTART_DEFAULT_EXPANDED):
         st.markdown(t("app.purpose_text"))
         st.caption(t("app.quickstart_text"))
         # GOV.UK-style "start page" additions (docs/UX-OPTIMIERUNGEN-

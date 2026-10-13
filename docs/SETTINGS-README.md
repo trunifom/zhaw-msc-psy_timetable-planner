@@ -34,6 +34,7 @@ allgemeines Konfigurationssystem.
 | `FEEDBACK_EMAIL` | `str` | `"trug@zhaw.ch"` | Empfänger-Adresse des Feedback-Widgets (🐞-Tab). |
 | `SHOW_RAW_DATA_TAB` | `bool` | `False` | Zeigt/versteckt den "🗄️ Rohdaten"-Tab komplett. |
 | `SHOW_EXTENDED_QUICKSTART` | `bool` | `True` | Zeigt Dauer/Voraussetzungen/Anmeldungs-Hinweis in der Schnellstart-Karte zusätzlich an. |
+| `QUICKSTART_DEFAULT_EXPANDED` | `bool` | `True` | Start-Zustand (auf-/zugeklappt) der jetzt interaktiven Schnellstart-Karte. |
 | `DEFAULT_THEME` | `"light" \| "dark" \| "auto"` | `"auto"` | Start-Theme für neue Besucher:innen (Sidebar-Umschalter bleibt immer verfügbar). |
 | `CHART_TITLE_STYLE` | `"label" \| "headline"` | `"headline"` | Dashboard-Chart-Überschriften als neutrales Label oder als datengetriebene Aussage. |
 | `SHOW_STEP_PROGRESS_INDICATOR` | `bool` | `True` | Zeigt den benannten Schritt-Fortschritt ("1 Datei hochladen → …") unter der Schnellstart-Karte. |
@@ -108,6 +109,29 @@ bisherigen, kürzeren Zustand.
 **Live verifiziert:** Playwright-Screenshot in Hell- und Dunkelmodus mit
 `SHOW_EXTENDED_QUICKSTART=True` - alle drei neuen Zeilen lesbar, der
 Disclaimer als eigener `st.info`-Hinweis hervorgehoben.
+
+---
+
+## `QUICKSTART_DEFAULT_EXPANDED`
+
+**Was:** Ob die "🚀 Schnellstart"-Karte beim allerersten Laden einer neuen
+Session **aufgeklappt** (`True`, Default) oder **eingeklappt** (`False`)
+startet. Die Karte ist seit 2026-10-13 ein echtes `st.expander`-Element -
+jede Besucherin/jeder Besucher kann sie jederzeit selbst auf-/zuklappen,
+unabhängig von diesem Flag. Dieses Flag bestimmt nur den Startzustand.
+
+**Warum:** Direkt gewünschtes "Ein- und Ausblenden" der Informationen im
+Schnellstart-Block - vorher war das eine starre `card()`-Box ohne
+Interaktionsmöglichkeit. `False` eignet sich z.B. für eine spätere Phase,
+in der wiederkehrende Studierende nicht bei jedem Besuch erneut die
+Einführung sehen sollen.
+
+**Code-Stelle:** `app.main()` - `st.expander(..., expanded=settings.
+QUICKSTART_DEFAULT_EXPANDED)` statt der bisherigen `card(...)`.
+
+**Live verifiziert:** Playwright-Screenshot - die Karte lässt sich per
+Klick auf die Kopfzeile auf-/zuklappen (Chevron-Symbol wechselt
+entsprechend), funktioniert in Hell- und Dunkelmodus.
 
 ---
 
