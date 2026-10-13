@@ -114,28 +114,46 @@ bekanntes Lesbarkeitsproblem, wenn Blöcke übereinander statt nebeneinander gez
 
 ### 3. Semester-Timeline: Wochen-Heatmap oder gruppierte Wochenliste statt/ergänzend zum Scatter-Plot
 
-**Status:** ✅ Teilweise erledigt am 2026-10-13, 09:10 (Commit `c3f5cd0`)
+**Status:** ✅ Vollständig erledigt am 2026-10-13, 09:45 (Commits `c3f5cd0`, `bb0c627`)
 
-**Umsetzung:** Die erste der beiden vorgeschlagenen Varianten (Wochen-Heatmap) ist umgesetzt.
-Neue, eigenständige Chart-Funktion `_semester_heatmap_figure()` in `src/app.py`: eine Zelle pro
-Kalenderdatum (Kalenderwoche × Wochentag), Farbe/Zahl = Anzahl Termine an diesem Tag,
-Konflikttage zusätzlich mit ⚠-Symbol markiert (nie nur Farbe). Im Dashboard-Tab über den
-bestehenden "🎨 Diagramm-Einstellungen"-Toolbar der Semesterübersicht per neuem
-"Ansicht"-Umschalter wählbar: "Punkte (bisherige Ansicht)" (Default, unverändert) vs. "Heatmap
-(Wochenübersicht)" (neu). **Die alte Scatter-Ansicht (`_semester_timeline_figure()`) wurde
-bewusst nicht entfernt** — auf expliziten Wunsch, damit beide Varianten zuerst im Team
-verglichen werden können (gleiches Vorgehen wie bei Punkt 2).
+**Umsetzung Teil 1 (Wochen-Heatmap, Commit `c3f5cd0`):** Neue, eigenständige Chart-Funktion
+`_semester_heatmap_figure()` in `src/app.py`: eine Zelle pro Kalenderdatum (Kalenderwoche ×
+Wochentag), Farbe/Zahl = Anzahl Termine an diesem Tag, Konflikttage zusätzlich mit ⚠-Symbol
+markiert (nie nur Farbe). Im Dashboard-Tab über den bestehenden
+"🎨 Diagramm-Einstellungen"-Toolbar der Semesterübersicht per "Ansicht"-Umschalter wählbar:
+"Punkte (bisherige Ansicht)" (Default, unverändert) vs. "Heatmap (Wochenübersicht)" (neu).
 
-Die zweite vorgeschlagene Variante (nach Kalenderwoche gruppierte Drill-down-Liste,
-"KW 42 · 3 Termine · 1 Konflikt", anklickbar) ist **noch offen** — eigenständig nachholbar,
-unabhängig von der Heatmap.
+Verifiziert: `py_compile` + `pytest -q` im korrekten Conda-Env (`zhaw_planner_env`), sowie
+Live-Test per Playwright mit einem echten Haupt+Zusatzmodule-Konfliktszenario in Hell- und
+Dunkelmodus. Dabei einen echten Darstellungsfehler gefunden und behoben: Ohne expliziten
+`zmin=0` landete ein Tag mit nur einem Termin am unteren Ende der Farbskala und war (v.a. im
+Dark Mode) nahezu weiss/unsichtbar — jetzt per `zmin`/`zmax`-Fixierung auf der Skala immer
+sichtbar tingiert.
 
-Verifiziert: `py_compile` + `pytest -q` (250/250 grün) im korrekten Conda-Env
-(`zhaw_planner_env`), sowie Live-Test per Playwright mit einem echten
-Haupt+Zusatzmodule-Konfliktszenario in Hell- und Dunkelmodus. Dabei einen echten
-Darstellungsfehler gefunden und behoben: Ohne expliziten `zmin=0` landete ein Tag mit nur
-einem Termin am unteren Ende der Farbskala und war (v.a. im Dark Mode) nahezu weiss/
-unsichtbar — jetzt per `zmin`/`zmax`-Fixierung auf der Skala immer sichtbar tingiert.
+**Umsetzung Teil 2 (gruppierte Wochenliste als Drill-down, Commit `bb0c627`):** Neue, reine
+(Streamlit-unabhängige) Funktion `_semester_week_groups()` gruppiert datierte Module nach
+Kalenderwoche (chronologisch nach tatsächlichem Montagsdatum, gleiche Jahreswechsel-Logik wie
+`_semester_grid_figure()`/`_semester_heatmap_figure()`). `_render_semester_week_list()` zeigt
+pro Woche einen `st.expander` ("KW 38 (14.09. - 20.09.) · 4 Termine · ⚠ 1 Konflikt(e)"),
+automatisch aufgeklappt nur bei einer Woche mit echtem Konflikt, mit einer Tabelle der
+Wochentermine darin (neue Konflikt-Spalte, rot getönt). Im selben "Ansicht"-Umschalter als
+dritte Option "Liste (nach Woche)" wählbar.
+
+**Beide neuen Ansichten (Heatmap und Liste) sowie die alte Scatter-Ansicht
+(`_semester_timeline_figure()`) bestehen unverändert nebeneinander** — auf expliziten Wunsch,
+damit alle drei im Team verglichen werden können, bevor über das Entfernen einer Variante
+entschieden wird.
+
+Verifiziert: `py_compile` + `pytest -q` (256/256 grün, davon 6 neu für
+`_semester_week_groups()`: Sortierung nach echtem Montagsdatum über den Jahreswechsel hinweg,
+Ausschluss undatierter Zeilen, Zählung von Terminen/distinkten Konflikttagen, Sortierung
+innerhalb einer Woche, Label-Format) im korrekten Conda-Env (`zhaw_planner_env`), sowie
+Live-Test per Playwright mit einem echten Haupt+Zusatzmodule-Konfliktszenario in Hell- und
+Dunkelmodus (Woche korrekt automatisch aufgeklappt, Konflikt-Termine rot getönt mit
+"⚠ Überschneidung"-Text, nicht-konfliktierende Termine ungetönt). Die reine
+UI-Rendering-Hälfte (`_render_semester_week_list`) bleibt gemäss bestehender Projekt-Policy
+(`docs/TESTING-README.md`) der manuellen/Playwright-Verifikation vorbehalten, nicht
+unit-getestet.
 
 **Problem:** `_semester_timeline_figure()` nutzt `px.scatter` über einen ca. 4-monatigen
 Zeitstrahl. Alle drei Recherche-Agenten kamen unabhängig zum selben Schluss: Für diese
