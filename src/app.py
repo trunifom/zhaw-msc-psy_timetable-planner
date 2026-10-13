@@ -2491,6 +2491,141 @@ def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | No
     return _apply_chart_theme(fig)
 
 
+def _semester_heatmap_figure(modules: List[Any], conflict_dates: set | None = None, color_scale: str = "Blues"):
+    """
+    Alternative "whole semester" view to _semester_timeline_figure(): a
+    week x weekday calendar heatmap (one cell per calendar date, colored by
+    how many sessions fall on it) instead of one scatter marker per session
+    plotted on a true, continuously-compressed calendar-date axis (see
+    docs/UX-OPTIMIERUNGEN-README.md Punkt 3). Over a ~4-month semester the
+    scatter view compresses so much that spotting "which weeks are
+    busiest" or "where are the exam weeks" takes real effort; a calendar-
+    style heatmap puts that directly into cell color and the printed
+    count, the convention used by GitHub's contribution graph and by van
+    Wijk & van Selow, "Cluster and Calendar-based Visualization" (IEEE
+    InfoVis 1999). Kept as a SEPARATE, independently selectable view (see
+    the "view_mode" toolbar choice in render_dashboard) rather than
+    replacing _semester_timeline_figure() outright - at the user's
+    explicit request, so both can be compared side by side with colleagues
+    before any decision to remove the old scatter view.
+
+    Weeks are ordered by their actual Monday date, not the raw ISO week
+    number - same year-boundary-wraparound reasoning documented on
+    _semester_grid_figure() (the HS semester crosses a calendar-year
+    boundary, where ISO week numbers wrap 52/53 -> 1).
+
+    `conflict_dates`: an optional set of `date` values that contain a time
+    conflict (see scheduler.find_time_conflicts) - rendered as a small
+    warning glyph on top of the cell, on top of (never instead of) the
+    count/color, so a conflict day is never communicated by color alone
+    (this app's established accessibility principle, see the
+    ux-clarity-patterns project memory). A day with zero sessions is left
+    as a blank/transparent cell (Plotly's native NaN handling) rather than
+    the lightest color on the scale, so "nothing scheduled" reads visibly
+    different from "very few sessions" - the "keep empty cells distinct
+    from zero" guidance for calendar heatmaps.
+    """
+    conflict_dates = conflict_dates or set()
+
+    counts: dict[date, int] = {}
+    weekday_labels: dict[date, str] = {}
+    for module in modules:
+        datum_value = getattr(module, "datum", None)
+        if datum_value is None:
+            continue
+        counts[datum_value] = counts.get(datum_value, 0) + 1
+        weekday_labels[datum_value] = _weekday_label(module)
+
+    if not counts:
+        return None
+
+    rows = []
+    for datum_value, count in counts.items():
+        week_monday = datum_value - timedelta(days=datum_value.weekday())
+        iso = datum_value.isocalendar()
+        rows.append(
+            {
+                "_week_label": f"KW {iso.week} ({week_monday.strftime('%d.%m.')})",
+                "_week_monday": week_monday,
+                c("weekday"): weekday_labels[datum_value],
+                "_count": count,
+                "_is_conflict": datum_value in conflict_dates,
+                "_date_display": datum_value.strftime("%d.%m.%Y"),
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    ordered_weeks = (
+        df[["_week_label", "_week_monday"]].drop_duplicates().sort_values("_week_monday")["_week_label"].tolist()
+    )
+    present_weekdays = [d for d in _weekday_labels_in_order() if d in set(df[c("weekday")])]
+
+    count_pivot = df.pivot_table(index=c("weekday"), columns="_week_label", values="_count", aggfunc="sum")
+    count_pivot = count_pivot.reindex(index=present_weekdays, columns=ordered_weeks)
+    conflict_pivot = df.pivot_table(index=c("weekday"), columns="_week_label", values="_is_conflict", aggfunc="max")
+    conflict_pivot = conflict_pivot.reindex(index=present_weekdays, columns=ordered_weeks)
+    date_pivot = df.pivot_table(index=c("weekday"), columns="_week_label", values="_date_display", aggfunc="first")
+    date_pivot = date_pivot.reindex(index=present_weekdays, columns=ordered_weeks)
+
+    z = count_pivot.values
+    text = [["" if pd.isna(value) else str(int(value)) for value in row] for row in z]
+    # zmin pinned to 0 (rather than Plotly's default of the data's own
+    # minimum, e.g. 1): a day with only a single session would otherwise
+    # sit at the very bottom of the color scale - for most sequential
+    # scales (including the "Blues" default) that's close to white, which
+    # reads as an empty cell and is nearly invisible against a dark theme
+    # background. Anchoring the scale at 0 instead means "1 session" is
+    # always visibly tinted, while a true empty (NaN) cell stays fully
+    # transparent regardless, so the two states remain distinguishable.
+    max_count = count_pivot.stack().max() if not count_pivot.stack().empty else 1
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z,
+            x=ordered_weeks,
+            y=present_weekdays,
+            colorscale=color_scale,
+            zmin=0,
+            zmax=max(1, max_count),
+            text=text,
+            texttemplate="%{text}",
+            textfont=dict(size=12),
+            customdata=date_pivot.values,
+            hovertemplate=f"<b>%{{y}}</b>, %{{customdata}}<br>{t('chart.yaxis_items')}: %{{z}}<extra></extra>",
+            xgap=3,
+            ygap=3,
+            showscale=True,
+            colorbar=dict(title=t("chart.yaxis_items")),
+        )
+    )
+
+    for row_idx, weekday in enumerate(present_weekdays):
+        for col_idx, week_label in enumerate(ordered_weeks):
+            cell_is_conflict = conflict_pivot.iat[row_idx, col_idx]
+            if cell_is_conflict is True or cell_is_conflict == 1.0:
+                fig.add_annotation(
+                    x=week_label,
+                    y=weekday,
+                    text="⚠",
+                    showarrow=False,
+                    font=dict(size=13, color=_CONFLICT_MARKER_COLOR),
+                    xanchor="right",
+                    yanchor="top",
+                    xshift=-6,
+                    yshift=14,
+                )
+
+    fig.update_yaxes(autorange="reversed")
+    fig.update_xaxes(tickangle=-45)
+    fig.update_layout(
+        height=max(420, 60 * len(present_weekdays) + 160),
+        margin=dict(l=10, r=10, t=20, b=90),
+        xaxis_title=t("chart.xaxis_semester"),
+        yaxis_title="",
+    )
+    return _apply_chart_theme(fig)
+
+
 _PRUEFUNGSEINSICHT_PATTERN = re.compile(r"pr(?:u|ue|ü)fungseinsicht", flags=re.IGNORECASE)
 
 
@@ -5422,12 +5557,32 @@ def render_dashboard(modules: List) -> None:
                 "color_by": [
                     (t("chart.color_by_module"), "module"),
                     (t("chart.color_by_type"), "type"),
-                ]
+                ],
+                # "heatmap" is the new week x weekday calendar view (docs/
+                # UX-OPTIMIERUNGEN-README.md Punkt 3); "scatter" is the
+                # original _semester_timeline_figure() view, kept available
+                # side by side at the user's explicit request for
+                # comparison before any decision to remove it.
+                "view_mode": [
+                    (t("chart.view_mode_scatter"), "scatter"),
+                    (t("chart.view_mode_heatmap"), "heatmap"),
+                ],
             },
         )
-        semester_timeline = _semester_timeline_figure(
-            timeline_modules, color_sequence=timeline_palette, color_by=timeline_choices.get("color_by", "module")
-        )
+        if timeline_choices.get("view_mode", "scatter") == "heatmap":
+            # Conflicts are recomputed from timeline_modules (the
+            # weekday-filtered view this chart actually renders), not the
+            # tab's full `modules`/`conflict_pairs` - a conflict whose
+            # partner session was just filtered out of view shouldn't
+            # still show a warning glyph on this chart.
+            timeline_conflict_dates = {
+                m.datum for pair in find_time_conflicts(timeline_modules) for m in pair if getattr(m, "datum", None) is not None
+            }
+            semester_timeline = _semester_heatmap_figure(timeline_modules, conflict_dates=timeline_conflict_dates)
+        else:
+            semester_timeline = _semester_timeline_figure(
+                timeline_modules, color_sequence=timeline_palette, color_by=timeline_choices.get("color_by", "module")
+            )
         if semester_timeline is not None:
             st.plotly_chart(semester_timeline, use_container_width=True)
         else:

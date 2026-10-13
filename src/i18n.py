@@ -333,6 +333,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.settings_layout_mode": "Darstellung bei Überschneidungen",
         "chart.layout_mode_stacked": "Gestapelt (bisherige Ansicht)",
         "chart.layout_mode_lanes": "Nebeneinander (wie im Kalender)",
+        "chart.view_mode_scatter": "Punkte (bisherige Ansicht)",
+        "chart.view_mode_heatmap": "Heatmap (Wochenübersicht)",
 
         "absence.reason.period": "Abwesenheitszeitraum",
         "absence.reason.date": "Einzelner Fehltag",
@@ -725,6 +727,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.settings_layout_mode": "Layout for overlapping sessions",
         "chart.layout_mode_stacked": "Stacked (previous view)",
         "chart.layout_mode_lanes": "Side by side (like a calendar)",
+        "chart.view_mode_scatter": "Dots (previous view)",
+        "chart.view_mode_heatmap": "Heatmap (weekly overview)",
 
         "absence.reason.period": "Absence period",
         "absence.reason.date": "Specific absence date",
@@ -1117,6 +1121,8 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.settings_layout_mode": "Affichage des chevauchements",
         "chart.layout_mode_stacked": "Empilé (vue précédente)",
         "chart.layout_mode_lanes": "Côte à côte (comme un calendrier)",
+        "chart.view_mode_scatter": "Points (vue précédente)",
+        "chart.view_mode_heatmap": "Carte thermique (aperçu hebdomadaire)",
 
         "absence.reason.period": "Période d'absence",
         "absence.reason.date": "Date d'absence précise",
