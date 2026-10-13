@@ -145,3 +145,24 @@ the `dashboard.chart.*_headline` keys (one per language) - edit the
 TEMPLATE TEXT there; this flag only switches which wording style is used,
 it does not need touching to tweak phrasing.
 """
+
+# ==========================================
+# Export
+# ==========================================
+
+ExportPlacement = Literal["main", "sidebar"]
+
+EXPORT_SECTION_PLACEMENT: ExportPlacement = "main"
+"""
+Where the Export section (Excel/ICS download buttons, gated behind the
+"Planung abgeschlossen" checkbox - that gating logic is unchanged either
+way) is shown:
+- "main" (default): as its own, clearly visible "4 Exportieren" card in
+  the main area, right after the result tabs - the actual payoff moment of
+  the whole upload-to-export flow, the same way Calendly treats "add to
+  calendar" as the payoff of its scheduling flow (docs/UX-OPTIMIERUNGEN-
+  README.md, Hauptpunkt 6).
+- "sidebar": the app's original placement, tucked below the upload cards
+  in the sidebar - functionally identical, but easy to overlook given it's
+  the actual goal of the whole tool.
+"""

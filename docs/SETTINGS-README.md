@@ -37,6 +37,7 @@ allgemeines Konfigurationssystem.
 | `DEFAULT_THEME` | `"light" \| "dark" \| "auto"` | `"auto"` | Start-Theme für neue Besucher:innen (Sidebar-Umschalter bleibt immer verfügbar). |
 | `CHART_TITLE_STYLE` | `"label" \| "headline"` | `"headline"` | Dashboard-Chart-Überschriften als neutrales Label oder als datengetriebene Aussage. |
 | `SHOW_STEP_PROGRESS_INDICATOR` | `bool` | `True` | Zeigt den benannten Schritt-Fortschritt ("1 Datei hochladen → …") unter der Schnellstart-Karte. |
+| `EXPORT_SECTION_PLACEMENT` | `"main" \| "sidebar"` | `"main"` | Export-Bereich als eigene Karte im Hauptbereich oder wie bisher in der Sidebar. |
 
 *(Diese Tabelle wächst mit jedem weiteren Flag - siehe die einzelnen
 Abschnitte unten für Details. Neue Einträge werden in dem Commit ergänzt,
@@ -236,3 +237,32 @@ zu lesen — dadurch sowohl Timing-sicher als auch ohne Mocking testbar) und
 **Live verifiziert:** Playwright-Durchlauf durch alle vier Zustände (vor
 Upload, nach Upload, nach Auswahl, nach Finalisieren) - Indikator aktualisiert
 sich jedes Mal sofort korrekt, kein Rerun-Lag.
+
+---
+
+## `EXPORT_SECTION_PLACEMENT`
+
+**Was:** Wo der Export-Bereich (Excel-/ICS-Download, weiterhin hinter der
+"Planung abgeschlossen"-Checkbox gesperrt — diese Gating-Logik ist
+unverändert) erscheint:
+
+- `"main"` (Default): als eigene, gut sichtbare "4 Exportieren"-Karte im
+  Hauptbereich, direkt nach den Ergebnis-Tabs — der eigentliche
+  Abschluss-Moment des gesamten Ablaufs, analog zu Calendlys "Add to
+  calendar" als Payoff-Moment (`docs/UX-OPTIMIERUNGEN-README.md`,
+  Hauptpunkt 6).
+- `"sidebar"`: die ursprüngliche Platzierung unterhalb der Upload-Karten
+  in der Sidebar — funktional identisch, aber leicht zu übersehen, obwohl
+  der Export das eigentliche Ziel des gesamten Tools ist.
+
+**Code-Stelle:** `app.render_sidebar()` rendert den Export-Bereich nur noch,
+wenn `settings.EXPORT_SECTION_PLACEMENT == "sidebar"`; `app.main()` rendert
+ihn bei `"main"` stattdessen als eigene `card("export-section")` nach dem
+letzten Tab. `render_export_section()` selbst ist in beiden Fällen
+unverändert dieselbe Funktion — nur die Aufrufstelle unterscheidet sich.
+
+**Live verifiziert:** Playwright-Test für beide Werte — bei `"main"`
+erscheint die Export-Karte korrekt im Hauptbereich (Checkbox + beide
+Download-Buttons funktionieren, Sperrzustand vor dem Abhaken korrekt
+sichtbar), bei `"sidebar"` erscheint sie wie zuvor in der Sidebar. In
+beiden Fällen genau 1 Checkbox auf der Seite (keine Dopplung).

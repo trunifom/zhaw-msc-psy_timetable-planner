@@ -5501,7 +5501,10 @@ def render_sidebar() -> None:
     needs), the optional Bachelor course-list upload for Passerelle
     students (see docs/planung/KONZEPT-passerelle-zusatzmodule.md -
     explicitly worded to make clear it only applies to a small group), and
-    (once data exists) the export section.
+    - only when settings.EXPORT_SECTION_PLACEMENT == "sidebar" (its
+    original placement; the default "main" instead renders it as its own
+    card in main(), see docs/UX-OPTIMIERUNGEN-README.md Hauptpunkt 6) -
+    the export section.
 
     Side effects on st.session_state: ui_theme (from the appearance
     toggle), and - indirectly, via handle_file_upload()/the "file removed"
@@ -5626,7 +5629,13 @@ def render_sidebar() -> None:
                     st.session_state.selected_course_bases = []
                     st.session_state.selected_row_ids = []
 
-        if st.session_state.processed_modules:
+        # "main" (default) moves this whole section out of the sidebar
+        # into its own visible card in the main area, right after the
+        # result tabs - see main()'s "export-section" card and docs/UX-
+        # OPTIMIERUNGEN-README.md Hauptpunkt 6. Only rendered here at all
+        # when settings.EXPORT_SECTION_PLACEMENT == "sidebar" (the app's
+        # original placement, kept for pilot comparison).
+        if settings.EXPORT_SECTION_PLACEMENT == "sidebar" and st.session_state.processed_modules:
             st.divider()
             modules_for_export = st.session_state.get("selected_modules") or st.session_state.processed_modules
             render_export_section(modules_for_export)
@@ -6692,6 +6701,23 @@ def main() -> None:
     if "raw" in tabs_by_key:
         with tabs_by_key["raw"]:
             render_raw_data()
+
+    # Export as its own, clearly visible "4 Exportieren" card in the main
+    # area, right after the result tabs - the actual payoff moment of the
+    # whole upload-to-export flow (Calendly "add to calendar" pattern, see
+    # docs/UX-OPTIMIERUNGEN-README.md Hauptpunkt 6), rather than tucked
+    # away below the upload cards in the sidebar. Toggleable via settings.
+    # EXPORT_SECTION_PLACEMENT (see that flag's docstring); when set to
+    # "sidebar", render_sidebar() renders this same section there instead
+    # and nothing further happens here. render_export_section() itself
+    # already renders its own "📥 Export" st.subheader, so this card is
+    # given no title of its own (see card()'s docstring on empty titles)
+    # to avoid a duplicate heading - its icon+border alone still groups it
+    # visually like every other main-area section.
+    if settings.EXPORT_SECTION_PLACEMENT == "main" and st.session_state.processed_modules:
+        with card("export-section"):
+            st.markdown(f"#### {t('app.step_progress.export')}")
+            render_export_section(selected_modules or st.session_state.processed_modules)
 
 # ==========================================
 # ENTRY POINT

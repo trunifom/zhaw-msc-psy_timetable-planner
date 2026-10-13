@@ -262,7 +262,19 @@ Streamlit-Forum-Thread zu eingeklappter Mobile-Sidebar (discuss.streamlit.io).
 
 ### 6. Export als eigenen, sichtbaren Abschluss-Schritt statt Sidebar-Anhängsel
 
-**Status:** ⬜ Offen
+**Status:** ✅ Erledigt am 2026-10-13, 14:45 (Commit `<wird nach Commit ergänzt>`)
+
+**Umsetzung:** Der Export-Bereich erscheint jetzt standardmässig als eigene, gut sichtbare
+"4 Exportieren"-Karte im Hauptbereich, direkt nach den Ergebnis-Tabs — statt unterhalb der
+Upload-Karten in der Sidebar. Bestehende Gating-Logik (Export erst nach "Planung
+abgeschlossen"-Checkbox) unverändert übernommen; `render_export_section()` selbst wurde nicht
+verändert, nur die Aufrufstelle. Per neuem Flag `settings.EXPORT_SECTION_PLACEMENT`
+(`"main" | "sidebar"`, Default `"main"`) umschaltbar — siehe `docs/SETTINGS-README.md`.
+
+Verifiziert: `py_compile` + `pytest -q` (278/278 grün, keine Regressionen) im korrekten
+Conda-Env, sowie Live-Test per Playwright für beide Werte — Export-Karte erscheint korrekt an
+der jeweils erwarteten Stelle, Checkbox-Gating und beide Download-Buttons funktionieren, keine
+Dopplung in beiden Fällen.
 
 **Problem:** `render_export_section()` sitzt aktuell in der Sidebar unterhalb der
 Upload-Karten — leicht zu übersehen, obwohl Export (XLSX/ICS) das eigentliche Ziel der
