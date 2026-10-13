@@ -4069,6 +4069,56 @@ _MULTI_VALUE_FILTER_KEYS = (
 _TEXT_FILTER_KEY = "filter_search"
 _RADIO_FILTER_KEY = "filter_zusatzmodule_mode"
 
+# A counter suffixed onto the free-text search box's actual widget `key=`
+# (see _text_filter_widget_key()) - everything else in this file keeps using
+# the plain, stable `_TEXT_FILTER_KEY` string as its LOGICAL identifier
+# (translation lookups, chip identity), so this counter only needs to be
+# read at the two places that touch the widget's real session_state key:
+# instantiating it and clearing it. See _text_filter_widget_key()'s
+# docstring for why plain session_state.pop() alone isn't reliable for this
+# one specific widget.
+_TEXT_FILTER_VERSION_KEY = "filter_search_version"
+
+
+def _text_filter_widget_key() -> str:
+    """
+    The free-text search box's ACTUAL `st.text_input(key=...)` for this
+    render - `f"{_TEXT_FILTER_KEY}_{version}"` - instead of the bare,
+    unversioned `_TEXT_FILTER_KEY` string every other filter widget in this
+    file uses directly as its own stable key.
+
+    Why this one widget needs it and the others don't: `_reset_all_filters()`
+    and the per-chip "✕" handler (`_render_active_filter_chips()`) both
+    reset a filter by popping its session_state entry and letting the widget
+    re-render with no stored value - the standard, Streamlit-documented
+    pattern, and it works fine for every `st.multiselect`/`st.radio` filter
+    here, which commit their value to the backend immediately on every
+    click. `st.text_input` does not: it only commits on blur/Enter, so the
+    browser can be holding an "uncommitted" copy of the last-typed text that
+    is independent of whatever Streamlit just told it to display. Confirmed
+    live with Playwright: clicking "Alle Filter zurücksetzen" DID correctly
+    clear the search text for that exact render (the match count/table
+    updated correctly, matching every other filter) - but the NEXT,
+    completely unrelated widget interaction anywhere on the page (observed
+    with the "Prüfungstermine einschliessen" checkbox, nothing to do with
+    search) silently resurrected the OLD search text right back into
+    session_state, re-narrowing the table with no visible cause. Reported by
+    a user as "der Filter wird nicht wirklich gelöscht" together with a
+    course that then couldn't be selected - see _dataframe_row_selection()'s
+    docstring for how a row set that silently changes between two reruns
+    (exactly what this bug does) can discard an in-flight row-selection
+    click as a side effect.
+
+    Bumping this counter - instead of just popping session_state - changes
+    the widget's own `key=` on the next render, which Streamlit/React treats
+    as an entirely new component instance with no prior value to resubmit,
+    rather than the same instance silently reasserting its last displayed
+    text. The old, now-orphaned versioned key is also explicitly popped
+    (see call sites) purely to avoid accumulating stale entries in
+    session_state over a long-lived session - not required for correctness.
+    """
+    return f"{_TEXT_FILTER_KEY}_{st.session_state.get(_TEXT_FILTER_VERSION_KEY, 0)}"
+
 
 def _active_filter_count() -> int:
     """
@@ -4089,7 +4139,7 @@ def _active_filter_count() -> int:
     safe and not one rerun behind).
     """
     count = sum(1 for key in _MULTI_VALUE_FILTER_KEYS if st.session_state.get(key))
-    if str(st.session_state.get(_TEXT_FILTER_KEY, "")).strip():
+    if str(st.session_state.get(_text_filter_widget_key(), "")).strip():
         count += 1
     if st.session_state.get(_RADIO_FILTER_KEY, t("guided.filter.zusatzmodule_all")) != t("guided.filter.zusatzmodule_all"):
         count += 1
@@ -4114,10 +4164,18 @@ def _reset_all_filters() -> None:
     change is already visible by the time THIS SAME run finishes - the
     same "one-shot action consumed later in this run" pattern
     _select_all_controls() uses.
+
+    The free-text search box is the one exception: a plain session_state
+    pop isn't reliable for it (see _text_filter_widget_key()'s docstring for
+    the live-confirmed bug this caused) - bumping its version counter so the
+    NEXT render gives it a brand-new widget key, forcing a true remount
+    instead of hoping the same widget instance "forgets" its last displayed
+    text.
     """
     for key in _MULTI_VALUE_FILTER_KEYS:
         st.session_state.pop(key, None)
-    st.session_state.pop(_TEXT_FILTER_KEY, None)
+    st.session_state.pop(_text_filter_widget_key(), None)
+    st.session_state[_TEXT_FILTER_VERSION_KEY] = st.session_state.get(_TEXT_FILTER_VERSION_KEY, 0) + 1
     st.session_state.pop(_RADIO_FILTER_KEY, None)
 
 
@@ -4166,7 +4224,7 @@ def _active_filter_chips() -> list[tuple[str, str, str]]:
         if values:
             chips.append((key, _filter_field_label(key), ", ".join(values)))
 
-    search_value = str(st.session_state.get(_TEXT_FILTER_KEY, "")).strip()
+    search_value = str(st.session_state.get(_text_filter_widget_key(), "")).strip()
     if search_value:
         chips.append((_TEXT_FILTER_KEY, _filter_field_label(_TEXT_FILTER_KEY), search_value))
 
@@ -4232,7 +4290,17 @@ def _render_active_filter_chips() -> None:
                     help=t("guided.filter.chip_remove_help"),
                     width="stretch",
                 ):
-                    st.session_state.pop(state_key, None)
+                    if state_key == _TEXT_FILTER_KEY:
+                        # Same remount-instead-of-pop fix as
+                        # _reset_all_filters() - see
+                        # _text_filter_widget_key()'s docstring for why a
+                        # plain pop isn't reliable for this one widget.
+                        st.session_state.pop(_text_filter_widget_key(), None)
+                        st.session_state[_TEXT_FILTER_VERSION_KEY] = (
+                            st.session_state.get(_TEXT_FILTER_VERSION_KEY, 0) + 1
+                        )
+                    else:
+                        st.session_state.pop(state_key, None)
                     st.rerun()
 
 
@@ -4596,7 +4664,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         search_text = st.text_input(
             t("guided.search.text"),
             placeholder=t("guided.search.text_placeholder"),
-            key="filter_search",
+            key=_text_filter_widget_key(),
             help=t("guided.search.text_help"),
         ).strip().lower()
 

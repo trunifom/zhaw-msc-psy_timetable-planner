@@ -722,6 +722,70 @@ live: the Wochenplan Gantt bars now show "AKP10-1"-style codes, and both
 bar charts' axes/legends show short labels with no raw internal column
 name leaking anywhere on screen.
 
+## Stale free-text search filter silently resurrecting itself after reset
+
+A 2026-10-13 user report described two symptoms that turned out to share
+one root cause: (1) a specific course ("AF6 - Wissenschaftstheorien",
+reproduced with a real MSc export, not a fixture) could be found via the
+Schritt-2 search, clicked, but never actually showed up in the selection;
+(2) clicking "🧹 Alle Filter zurücksetzen" visibly cleared the filters
+(table briefly showed the full, unfiltered row count), but as soon as the
+student clicked anything else at all - **any** other widget, nothing to do
+with filtering - the "🔍 Filter" expander popped back open on its own,
+showing "(1 aktiv)" with the old search text back in the box.
+
+**Live reproduction (Playwright, against a real export file from
+`data/real/`, never committed):** typed a search term, pressed Enter
+(match count narrowed correctly), clicked "Alle Filter zurücksetzen" (match
+count correctly jumped back to the full row count, confirming the reset DID
+work for that one render), then clicked a totally unrelated checkbox
+elsewhere on the page (`Prüfungstermine in die Auswahl einschliessen`) -
+and the match count silently collapsed right back down to the old filtered
+value, with the search box showing the old text again. This is a verified,
+narrow Streamlit `st.text_input` behavior, not a one-off fluke: unlike
+`st.multiselect`/`st.radio`/`st.checkbox` (which commit their value to the
+backend immediately on every click and reset cleanly via a plain
+`session_state.pop()`), `st.text_input` only commits on blur/Enter, so the
+browser can be holding an "uncommitted" copy of the last-displayed text
+independently of whatever session_state says server-side. Popping the
+key and letting the SAME widget `key=` re-render with no value visibly
+clears it for exactly one render, but the next **any** interaction's
+round-trip to the backend re-submits that stale browser-held text, and it
+sticks from then on.
+
+**Why this silently broke course selection, not just the filter display:**
+`_dataframe_row_selection()` (see its own docstring above) only re-seeds a
+selection table's checked rows when the row SET changed between reruns.
+The phantom search text reappearing mid-interaction is exactly that kind
+of silent row-set change - if it happens on the very rerun that processes
+a checkbox click, the table's row positions shift under it and the
+just-made click's result is discarded by the reseed logic before it is
+ever merged into `st.session_state.selected_course_bases`. Fixed
+end-to-end and reproduced with the exact sequence a student would hit:
+search → reset → immediately click a course row in the now-full table →
+the course stays selected, including through a further unrelated
+interaction afterwards (previously it would have silently dropped out).
+
+**Fix:** `_text_filter_widget_key()` (`src/app.py`) gives the search box a
+VERSIONED `key=` (`f"filter_search_{version}"`) instead of the bare,
+stable key every other filter widget uses - the same "bump a version
+counter to force a true widget remount" technique this file already uses
+elsewhere (`_select_all_controls()`'s `module_version`, the sidebar
+Zusatzmodule uploader's version counter). `_reset_all_filters()` and the
+per-filter-chip "✕" handler (`_render_active_filter_chips()`) both bump
+this counter instead of only popping session_state for this one widget,
+forcing Streamlit/React to mount a brand-new component instance with
+nothing stale left to resubmit. Every other filter widget (multiselects,
+the Zusatzmodule radio) was left on its plain, unversioned key - they
+never showed this symptom, and changing something that already works
+would be pure risk for no benefit.
+
+No new automated test for this - unlike `_semester_week_groups()`-style
+pure helpers, this bug lives entirely in widget/frontend interaction
+timing, squarely in the "`src/app.py`'s interactive UI has no automated
+test coverage by policy" bucket this section opened with. Verified only
+live with Playwright, as above.
+
 ## Adding new tests
 
 - Match the file that already covers the module you're changing (see the
