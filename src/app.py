@@ -161,26 +161,31 @@ if "ui_theme" not in st.session_state:
 if "sidebar_theme_toggle" in st.session_state:
     st.session_state.ui_theme = "dark" if st.session_state.sidebar_theme_toggle else "light"
 
-# Same fix, same reason, for the language selector: render_sidebar() (which
-# normally writes st.session_state.ui_language) runs much later in the
-# script, so without this, every t()-translated string positioned before
-# that point in the source - the sidebar header, the "Darstellung"/"Daten
-# und Sprache" card titles, the "Dunkles Design" toggle label - would keep
-# showing the *previous* language for one extra rerun after switching,
-# while everything after it (including the rest of the app, rendered once
-# render_sidebar() returns) already shows the new one. This was reported as
-# stray German/French labels stuck at the top of the sidebar right after
-# switching to English. The three option labels ("Deutsch"/"English"/
-# "Français") are identical across all three language blocks in TEXTS -
-# each language names itself and the others by their own endonym - so this
-# reverse mapping doesn't depend on which language happens to be active yet.
+# Same fix, same reason, for the language selector: _render_header_
+# language_switcher() (which normally writes st.session_state.ui_language)
+# runs much later in the script (as part of main()'s header row - moved
+# there from the sidebar, see docs/UX-OPTIMIERUNGEN-README.md Hauptpunkt 5:
+# a collapsed-by-default sidebar on mobile must never be the only place to
+# find the language switch), so without this, every t()-translated string
+# positioned before that point in the source - the sidebar header, the
+# "Darstellung"/"Daten und Sprache" card titles, the "Dunkles Design"
+# toggle label - would keep showing the *previous* language for one extra
+# rerun after switching, while everything after it already shows the new
+# one. This was originally reported as stray German/French labels stuck at
+# the top of the sidebar right after switching to English (back when the
+# switcher itself lived in the sidebar); the same fix still applies now
+# that the widget moved to the header. The three option labels
+# ("Deutsch"/"English"/"Français") are identical across all three language
+# blocks in TEXTS - each language names itself and the others by their own
+# endonym - so this reverse mapping doesn't depend on which language
+# happens to be active yet.
 _language_option_to_code = {
     get_text("de", "sidebar.language_option.de"): "de",
     get_text("de", "sidebar.language_option.en"): "en",
     get_text("de", "sidebar.language_option.fr"): "fr",
 }
-if st.session_state.get("sidebar_language_selector") in _language_option_to_code:
-    st.session_state.ui_language = _language_option_to_code[st.session_state.sidebar_language_selector]
+if st.session_state.get("header_language_selector") in _language_option_to_code:
+    st.session_state.ui_language = _language_option_to_code[st.session_state.header_language_selector]
 
 # --- Design tokens -----------------------------------------------------
 # Single source of truth for every color used in the custom CSS below.
@@ -5457,23 +5462,51 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 # ==========================================
 # Im Abschnitt # 4. MAIN UI COMPONENTS die render_sidebar anpassen:
 
+def _render_header_language_switcher() -> None:
+    """
+    Render the de/en/fr language selectbox in the main header row (top
+    right, next to the title - see main()) instead of inside the
+    collapsible sidebar it used to live in. Implements docs/UX-
+    OPTIMIERUNGEN-README.md's Hauptpunkt 5: Streamlit's sidebar starts
+    collapsed behind a small arrow on mobile (confirmed, documented
+    Streamlit-forum behavior), but the language choice is the very first
+    decision a new visitor makes - it must never be hidden behind that
+    arrow. The light/dark theme toggle deliberately stays in the sidebar
+    (lower priority per that same doc entry - NN/g: users treat theme as a
+    system-wide setting, not an urgent one to hunt for).
+
+    Reuses `_language_option_to_code` (built once near the top of this
+    file for the early "apply the new language in THIS SAME rerun" fix -
+    see that block's own comment) as the reverse lookup for this widget's
+    options, rather than rebuilding an equivalent label->code dict here.
+    """
+    selected_language = st.selectbox(
+        t("sidebar.language"),
+        options=list(_language_option_to_code.keys()),
+        index=["de", "en", "fr"].index(st.session_state.get("ui_language", "de")),
+        key="header_language_selector",
+        help=t("sidebar.language_help"),
+        label_visibility="collapsed",
+    )
+    st.session_state.ui_language = _language_option_to_code[selected_language]
+
+
 def render_sidebar() -> None:
     """
-    Renders the sidebar, top to bottom: appearance controls, the UI
-    language switch (its own card - kept separate from the file uploads
-    below so it reads as "a setting", not "part of the Master upload"),
-    the Master-module course-list upload ("Kursliste Mastermodule" - the
-    file every MSc Psychology student needs), the optional Bachelor
-    course-list upload for Passerelle students (see
-    docs/planung/KONZEPT-passerelle-zusatzmodule.md - explicitly worded to
-    make clear it only applies to a small group), and (once data exists)
-    the export section.
+    Renders the sidebar, top to bottom: appearance controls (the UI
+    language switch itself now lives in the main header row, not here -
+    see _render_header_language_switcher() and docs/UX-OPTIMIERUNGEN-
+    README.md Hauptpunkt 5), the Master-module course-list upload
+    ("Kursliste Mastermodule" - the file every MSc Psychology student
+    needs), the optional Bachelor course-list upload for Passerelle
+    students (see docs/planung/KONZEPT-passerelle-zusatzmodule.md -
+    explicitly worded to make clear it only applies to a small group), and
+    (once data exists) the export section.
 
     Side effects on st.session_state: ui_theme (from the appearance
-    toggle), ui_language (from the language selectbox), and - indirectly,
-    via handle_file_upload()/the "file removed" branches below -
-    raw_data(_zusatz), processed_modules_main/_zusatz, the derived
-    processed_modules, conflicts, selected_modules and
+    toggle), and - indirectly, via handle_file_upload()/the "file removed"
+    branches below - raw_data(_zusatz), processed_modules_main/_zusatz,
+    the derived processed_modules, conflicts, selected_modules and
     selected_course_bases.
     """
     with st.sidebar:
@@ -5493,21 +5526,6 @@ def render_sidebar() -> None:
                 help=t("sidebar.theme_help"),
             )
             st.session_state.ui_theme = "dark" if dark_mode else "light"
-
-        with card("sidebar-language", "🌐", t("sidebar.section.language")):
-            language_options = {
-                t("sidebar.language_option.de"): "de",
-                t("sidebar.language_option.en"): "en",
-                t("sidebar.language_option.fr"): "fr",
-            }
-            selected_language = st.selectbox(
-                t("sidebar.language"),
-                options=list(language_options.keys()),
-                index=["de", "en", "fr"].index(st.session_state.get("ui_language", "de")),
-                key="sidebar_language_selector",
-                help=t("sidebar.language_help"),
-            )
-            st.session_state.ui_language = language_options[selected_language]
 
         with card("sidebar-data", "📁", t("sidebar.section.data")):
             st.caption(t("sidebar.data_description"))
@@ -6581,8 +6599,18 @@ def main() -> None:
     # Render Sidebar
     render_sidebar()
 
-    st.title(t("app.title"))
-    st.markdown(t("app.subtitle"))
+    # Language switch sits top-right next to the title, not in the sidebar
+    # (see _render_header_language_switcher()'s docstring and docs/UX-
+    # OPTIMIERUNGEN-README.md Hauptpunkt 5) - always visible regardless of
+    # the sidebar's collapsed/expanded state. `vertical_alignment="center"`
+    # keeps the (visually short, label-collapsed) selectbox centered next
+    # to the much taller title/subtitle column instead of stuck to its top.
+    header_col_title, header_col_lang = st.columns([5, 1], vertical_alignment="center")
+    with header_col_title:
+        st.title(t("app.title"))
+        st.markdown(t("app.subtitle"))
+    with header_col_lang:
+        _render_header_language_switcher()
 
     with card("app-quickstart", "🚀", t("app.quickstart_title")):
         st.markdown(t("app.purpose_text"))

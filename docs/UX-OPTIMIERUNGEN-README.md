@@ -224,7 +224,20 @@ NN/g "Progress Indicators" (nngroup.com/articles/progress-indicators), GOV.UK "C
 
 ### 5. Sprachumschalter aus der Sidebar an eine immer sichtbare Stelle
 
-**Status:** ⬜ Offen
+**Status:** ✅ Erledigt am 2026-10-13, 14:10 (Commit `<wird nach Commit ergänzt>`)
+
+**Umsetzung:** Der Sprachumschalter (de/en/fr) sitzt jetzt oben rechts neben dem Titel im
+Hauptbereich (`_render_header_language_switcher()`, neue Spalten-Layout in `main()`) statt in
+der Sidebar — immer sichtbar, unabhängig vom Sidebar-Zustand. Die Sidebar-Karte
+"🌐 Sprache" wurde entfernt; der Theme-Toggle bleibt wie empfohlen in der Sidebar. Der Widget-
+Key wurde von `sidebar_language_selector` zu `header_language_selector` umbenannt — der
+bestehende `t()`-vor-Widget-Rerun-Fix (frühes Session-State-Sync vor der CSS-Generierung)
+wurde entsprechend mitaktualisiert, nicht entfernt.
+
+Verifiziert: `py_compile` + `pytest -q` (278/278 grün, keine Regressionen) im korrekten
+Conda-Env, sowie Live-Test per Playwright — Sprachwechsel zu Englisch funktioniert korrekt
+(Header, Sidebar, Quickstart-Karte alle übersetzt), Position bleibt in Hell- und Dunkelmodus
+stabil und gut lesbar.
 
 **Problem:** Streamlit-Sidebars sind auf Mobilgeräten standardmässig eingeklappt (bestätigtes,
 dokumentiertes Verhalten, siehe Streamlit-Forum). Die Sprachwahl ist aber die erste Entscheidung
