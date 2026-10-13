@@ -47,14 +47,15 @@ change for the next test round / next semester" config lives in one file.
 # Navigation / tabs
 # ==========================================
 
-SHOW_RAW_DATA_TAB: bool = True
+SHOW_RAW_DATA_TAB: bool = False
 """
 Whether the "🗄️ Rohdaten" tab (original upload + cleaned/selected data as
 plain tables - mainly a transparency/debugging aid, not a planning tool) is
-shown at all. Pilot feedback suggested most students never need it day to
-day; kept behind this flag rather than deleted since it's still useful when
-troubleshooting a specific student's upload. Read by app.py's
-`_main_tab_specs()`.
+shown at all. Hidden by default (2026-10-13 product decision) - it is
+overflow/debugging content that every actual MSc Psychology student can do
+without; kept behind this flag rather than deleted since it's still useful
+to flip back on when troubleshooting a specific student's upload or during
+a future pilot round. Read by app.py's `_main_tab_specs()`.
 """
 
 # ==========================================

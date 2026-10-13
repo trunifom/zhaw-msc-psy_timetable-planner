@@ -32,7 +32,7 @@ allgemeines Konfigurationssystem.
 | Flag | Typ | Default | Wirkung |
 |---|---|---|---|
 | `FEEDBACK_EMAIL` | `str` | `"trug@zhaw.ch"` | Empfänger-Adresse des Feedback-Widgets (🐞-Tab). |
-| `SHOW_RAW_DATA_TAB` | `bool` | `True` | Zeigt/versteckt den "🗄️ Rohdaten"-Tab komplett. |
+| `SHOW_RAW_DATA_TAB` | `bool` | `False` | Zeigt/versteckt den "🗄️ Rohdaten"-Tab komplett. |
 | `SHOW_EXTENDED_QUICKSTART` | `bool` | `True` | Zeigt Dauer/Voraussetzungen/Anmeldungs-Hinweis in der Schnellstart-Karte zusätzlich an. |
 | `DEFAULT_THEME` | `"light" \| "dark" \| "auto"` | `"auto"` | Start-Theme für neue Besucher:innen (Sidebar-Umschalter bleibt immer verfügbar). |
 | `CHART_TITLE_STYLE` | `"label" \| "headline"` | `"headline"` | Dashboard-Chart-Überschriften als neutrales Label oder als datengetriebene Aussage. |
@@ -65,13 +65,15 @@ beantwortet wird.
 ## `SHOW_RAW_DATA_TAB`
 
 **Was:** Ganzer "🗄️ Rohdaten"-Tab (Originaldaten + bereinigte/ausgewählte
-Termine als reine Tabellen) sichtbar (`True`, Default) oder komplett
-ausgeblendet (`False`).
+Termine als reine Tabellen) ausgeblendet (`False`, Default seit 2026-10-13)
+oder sichtbar (`True`).
 
-**Warum:** Rückmeldungen aus dem Pilotbetrieb deuten darauf hin, dass die
-meisten Studierenden diesen Tab im Alltag nicht brauchen - er bleibt aber
-nützlich, um bei Rückfragen den Datenimport einer bestimmten Person zu
-überprüfen. Deshalb ausblendbar statt gelöscht.
+**Warum:** Für den eigentlichen Planungsablauf überflüssiger
+Debugging-/Transparenz-Inhalt, den keine Studentin/kein Student im Alltag
+braucht - auf expliziten Wunsch standardmässig ausgeblendet. Bleibt als
+Flag erhalten (statt gelöscht), weil er nützlich ist, um bei Rückfragen den
+Datenimport einer bestimmten Person zu überprüfen - dafür einfach kurz auf
+`True` setzen und die App neu starten.
 
 **Code-Stelle:** `app._main_tab_specs()` baut die Liste der sichtbaren Tabs;
 `app.main()` rendert nur die Tabs aus dieser Liste. Bei `False` existiert
