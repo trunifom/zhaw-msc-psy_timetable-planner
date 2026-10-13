@@ -114,7 +114,28 @@ bekanntes Lesbarkeitsproblem, wenn Blöcke übereinander statt nebeneinander gez
 
 ### 3. Semester-Timeline: Wochen-Heatmap oder gruppierte Wochenliste statt/ergänzend zum Scatter-Plot
 
-**Status:** ⬜ Offen
+**Status:** ✅ Teilweise erledigt am 2026-10-13, 09:10 (Commit `c3f5cd0`)
+
+**Umsetzung:** Die erste der beiden vorgeschlagenen Varianten (Wochen-Heatmap) ist umgesetzt.
+Neue, eigenständige Chart-Funktion `_semester_heatmap_figure()` in `src/app.py`: eine Zelle pro
+Kalenderdatum (Kalenderwoche × Wochentag), Farbe/Zahl = Anzahl Termine an diesem Tag,
+Konflikttage zusätzlich mit ⚠-Symbol markiert (nie nur Farbe). Im Dashboard-Tab über den
+bestehenden "🎨 Diagramm-Einstellungen"-Toolbar der Semesterübersicht per neuem
+"Ansicht"-Umschalter wählbar: "Punkte (bisherige Ansicht)" (Default, unverändert) vs. "Heatmap
+(Wochenübersicht)" (neu). **Die alte Scatter-Ansicht (`_semester_timeline_figure()`) wurde
+bewusst nicht entfernt** — auf expliziten Wunsch, damit beide Varianten zuerst im Team
+verglichen werden können (gleiches Vorgehen wie bei Punkt 2).
+
+Die zweite vorgeschlagene Variante (nach Kalenderwoche gruppierte Drill-down-Liste,
+"KW 42 · 3 Termine · 1 Konflikt", anklickbar) ist **noch offen** — eigenständig nachholbar,
+unabhängig von der Heatmap.
+
+Verifiziert: `py_compile` + `pytest -q` (250/250 grün) im korrekten Conda-Env
+(`zhaw_planner_env`), sowie Live-Test per Playwright mit einem echten
+Haupt+Zusatzmodule-Konfliktszenario in Hell- und Dunkelmodus. Dabei einen echten
+Darstellungsfehler gefunden und behoben: Ohne expliziten `zmin=0` landete ein Tag mit nur
+einem Termin am unteren Ende der Farbskala und war (v.a. im Dark Mode) nahezu weiss/
+unsichtbar — jetzt per `zmin`/`zmax`-Fixierung auf der Skala immer sichtbar tingiert.
 
 **Problem:** `_semester_timeline_figure()` nutzt `px.scatter` über einen ca. 4-monatigen
 Zeitstrahl. Alle drei Recherche-Agenten kamen unabhängig zum selben Schluss: Für diese
