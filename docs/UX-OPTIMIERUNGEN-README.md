@@ -182,7 +182,7 @@ GitHub-Style Calendar-Heatmap-Konvention.
 
 ### 4. Sichtbarer, benannter Schritt-Fortschritt statt reiner Tab-Struktur
 
-**Status:** ✅ Teilweise erledigt am 2026-10-13, 13:30 (Commit `<wird nach Commit ergänzt>`)
+**Status:** ✅ Teilweise erledigt am 2026-10-13, 13:30 (Commit `7582dcb1`)
 
 **Umsetzung (erster, risikoarmer Teil):** Ein kompakter, benannter Fortschrittsindikator
 ("✓ 1 Datei hochladen → ▶ 2 Module wählen → 3 Plan prüfen → 4 Exportieren") erscheint jetzt
