@@ -332,7 +332,7 @@ Live-Test per Playwright in Hell- und Dunkelmodus — alle drei neuen Zeilen gut
 
 ### B. Theme-Default auf OS-Einstellung statt festem "light"-Default
 
-**Status:** ✅ Erledigt am 2026-10-13, 11:50 (Commit `<wird nach Commit ergänzt>`)
+**Status:** ✅ Erledigt am 2026-10-13, 11:50 (Commit `6e59e6d9`)
 
 **Umsetzung:** Neue, pure Funktion `app._resolve_default_theme()` plus Flag
 `settings.DEFAULT_THEME` (`"light" | "dark" | "auto"`, Default `"auto"`) - bei `"auto"` wird
