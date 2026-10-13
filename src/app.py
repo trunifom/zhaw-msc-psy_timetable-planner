@@ -5545,10 +5545,17 @@ def render_sidebar() -> None:
 
         # Group label above both upload cards (requested directly - the two
         # cards below used to follow "Darstellung" with no section break at
-        # all, reported as unclear/unintuitive). Plain bold text, not
-        # another st.header()/card() title, so it reads as "these two
-        # belong together" without competing with "⚙️ Steuerung" above it.
-        st.markdown(f"##### {t('sidebar.section.uploads')}")
+        # all, reported as unclear/unintuitive). Plain **bold** text (not a
+        # "#####"-style markdown heading) on purpose: _inject_design_system_
+        # css() only themes h1/h2/h3 (`.stApp h1/h2/h3 { color: var(--zp-
+        # accent); }`, see that function) - h4-h6 fall through to
+        # Streamlit's own default heading color, which doesn't know about
+        # this app's custom dark-mode background and was reported unreadable
+        # there. Bold text inside a plain paragraph inherits the already-
+        # correctly-themed body text color instead (same as the "Lade hier
+        # deinen Stundenplan..." sidebar description right above it), so it
+        # stays readable in both themes without needing a new CSS rule.
+        st.markdown(f"**{t('sidebar.section.uploads')}**")
 
         with card("sidebar-data", "📚", t("sidebar.section.data")):
             st.caption(t("sidebar.data_description"))
