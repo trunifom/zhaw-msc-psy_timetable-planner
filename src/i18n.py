@@ -330,6 +330,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.color_mode_single": "Einfarbig",
         "chart.view_total": "Gesamt",
         "chart.view_by_module": "Nach Modul aufgeschlüsselt",
+        "chart.settings_layout_mode": "Darstellung bei Überschneidungen",
+        "chart.layout_mode_stacked": "Gestapelt (bisherige Ansicht)",
+        "chart.layout_mode_lanes": "Nebeneinander (wie im Kalender)",
 
         "absence.reason.period": "Abwesenheitszeitraum",
         "absence.reason.date": "Einzelner Fehltag",
@@ -719,6 +722,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.color_mode_single": "Single color",
         "chart.view_total": "Total",
         "chart.view_by_module": "Split by module",
+        "chart.settings_layout_mode": "Layout for overlapping sessions",
+        "chart.layout_mode_stacked": "Stacked (previous view)",
+        "chart.layout_mode_lanes": "Side by side (like a calendar)",
 
         "absence.reason.period": "Absence period",
         "absence.reason.date": "Specific absence date",
@@ -1108,6 +1114,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "chart.color_mode_single": "Une seule couleur",
         "chart.view_total": "Total",
         "chart.view_by_module": "Réparti par module",
+        "chart.settings_layout_mode": "Affichage des chevauchements",
+        "chart.layout_mode_stacked": "Empilé (vue précédente)",
+        "chart.layout_mode_lanes": "Côte à côte (comme un calendrier)",
 
         "absence.reason.period": "Période d'absence",
         "absence.reason.date": "Date d'absence précise",

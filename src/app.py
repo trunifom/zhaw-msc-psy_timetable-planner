@@ -37,6 +37,7 @@ from contextlib import contextmanager
 from urllib.parse import quote
 import re
 import plotly.express as px
+import plotly.graph_objects as go
 from i18n import get_text
 
 # ==========================================
@@ -3113,6 +3114,201 @@ def _weekly_timeline_figure(modules: List[Any], color_mode: str = "multi", color
     return _apply_chart_theme(fig)
 
 
+def _assign_weekday_lanes(slots_for_day: list[dict]) -> int:
+    """
+    Greedy interval-graph-coloring/lane-packing for one weekday's slots -
+    the same convention Google Calendar/Outlook/Apple Calendar/
+    FullCalendar use to lay out overlapping calendar events side by side
+    instead of stacking them on top of each other (see
+    docs/UX-OPTIMIERUNGEN-README.md Punkt 2). Mutates each dict in
+    `slots_for_day` in place, adding a "lane" key (0-based); returns the
+    number of lanes needed for this day (at least 1).
+
+    Algorithm: sort slots by start time (longer duration first on a tie,
+    matching the convention documented for Google Calendar/FullCalendar),
+    then assign each slot to the first lane whose previous occupant has
+    already ended by this slot's start - the standard greedy
+    interval-scheduling lane assignment, open a new lane only when none of
+    the existing ones are free yet.
+    """
+
+    def _minutes(hhmmss: str) -> int:
+        hours, minutes, _seconds = (int(part) for part in hhmmss.split(":"))
+        return hours * 60 + minutes
+
+    ordered = sorted(
+        slots_for_day,
+        key=lambda slot: (_minutes(slot["start"]), -(_minutes(slot["end"]) - _minutes(slot["start"]))),
+    )
+    lane_end_minutes: list[int] = []
+    for slot in ordered:
+        start_minutes = _minutes(slot["start"])
+        end_minutes = _minutes(slot["end"])
+        lane = next((idx for idx, lane_end in enumerate(lane_end_minutes) if start_minutes >= lane_end), None)
+        if lane is None:
+            lane = len(lane_end_minutes)
+            lane_end_minutes.append(end_minutes)
+        else:
+            lane_end_minutes[lane] = end_minutes
+        slot["lane"] = lane
+    return max(len(lane_end_minutes), 1)
+
+
+def _weekly_timeline_lanes_figure(modules: List[Any], color_mode: str = "multi", color_sequence: list[str] | None = None):
+    """
+    Alternative "typical week" chart to _weekly_timeline_figure(): instead
+    of letting overlapping sessions stack as separate same-row Plotly-
+    timeline bars (distinguished only by the exam pattern-hatch and
+    hover), this lays overlapping sessions out side by side in equal-width
+    lanes within their weekday's row - the real-calendar convention
+    (Google Calendar/Outlook/Apple Calendar/FullCalendar) researched for
+    docs/UX-OPTIMIERUNGEN-README.md Punkt 2. Kept as a SEPARATE,
+    independently selectable chart (see the "layout_mode" toolbar choice
+    in render_timetable) rather than replacing _weekly_timeline_figure()
+    outright - at the user's explicit request, so both can be compared
+    side by side with colleagues before deciding whether to remove the
+    old stacked view.
+
+    Built with go.Bar directly rather than px.timeline, because
+    px.timeline has no concept of "several sub-rows within one category
+    row" - every slot's vertical position is computed by hand: each
+    weekday gets its own vertical "band" whose height is exactly that
+    day's own maximum lane count (via _assign_weekday_lanes), stacked
+    top-to-bottom in weekday order with a small gap between bands - a day
+    with no overlaps stays a single thin row, a day with e.g. a
+    triple-booked slot only grows taller for itself, not for every other
+    day too.
+    """
+    if not modules:
+        return None
+
+    day_labels = _weekday_labels_in_order()
+    slots_by_day: dict[str, list[dict]] = {day: [] for day in day_labels}
+    for slot in _weekly_timeline_slots(modules):
+        if slot["weekday"] in slots_by_day:
+            slots_by_day[slot["weekday"]].append(dict(slot))
+
+    # Fold the same blocked-weekday absence overlay _weekly_timeline_figure()
+    # draws into the lane-packing too, so a blocked half-day correctly
+    # claims its own lane instead of silently overlapping a real session
+    # bar underneath it.
+    settings = _absence_settings()
+    overlay_df = _absence_overlay_for_week(settings)
+    if not overlay_df.empty:
+        for _, overlay_row in overlay_df.iterrows():
+            day = overlay_row[c("weekday")]
+            if day not in slots_by_day:
+                continue
+            slots_by_day[day].append(
+                {
+                    "weekday": day,
+                    "label": overlay_row[c("module")],
+                    "short_label": overlay_row[c("module")],
+                    "start": overlay_row[c("start")].strftime("%H:%M:%S"),
+                    "end": overlay_row[c("end")].strftime("%H:%M:%S"),
+                    "exam": False,
+                    c("occurrences"): 1,
+                    c("period"): "",
+                }
+            )
+
+    LANE_GAP = 0.25  # extra vertical whitespace between two weekday bands
+    BAR_FRACTION = 0.82  # bar thickness as a fraction of one lane's height
+
+    positioned_slots: list[dict] = []
+    tickvals: list[float] = []
+    ticktext: list[str] = []
+    y_cursor = 0.0
+    for day in day_labels:
+        day_slots = slots_by_day[day]
+        max_lanes = _assign_weekday_lanes(day_slots) if day_slots else 1
+        tickvals.append(y_cursor + max_lanes / 2)
+        ticktext.append(day)
+        for slot in day_slots:
+            slot["_y"] = y_cursor + slot.get("lane", 0) + 0.5
+            positioned_slots.append(slot)
+        y_cursor += max_lanes + LANE_GAP
+
+    if not positioned_slots:
+        return None
+
+    if color_mode == "single":
+        theme = THEME_TOKENS.get(st.session_state.get("ui_theme", "light"), THEME_TOKENS["light"])
+        resolved_sequence = [theme["accent"]]
+        color_key_fn = lambda _slot: t("chart.color_mode_single")
+    else:
+        resolved_sequence = color_sequence or list(_chart_palettes().values())[0]
+        color_key_fn = lambda slot: _truncate_text(slot["label"])
+
+    palette_lookup: dict[str, str] = {}
+    fig = go.Figure()
+    seen_legend_names: set[str] = set()
+    for slot in positioned_slots:
+        start_dt = pd.to_datetime(f"1970-01-01 {slot['start']}")
+        end_dt = pd.to_datetime(f"1970-01-01 {slot['end']}")
+        color_key = color_key_fn(slot)
+        if color_key not in palette_lookup:
+            palette_lookup[color_key] = resolved_sequence[len(palette_lookup) % len(resolved_sequence)]
+        show_legend = color_mode != "single" and color_key not in seen_legend_names
+        seen_legend_names.add(color_key)
+        occurrences = slot.get(c("occurrences"), 1)
+        period = slot.get(c("period"), "")
+        hover_lines = [
+            f"<b>{slot['label']}</b>",
+            f"{slot['weekday']}, {start_dt.strftime('%H:%M')}–{end_dt.strftime('%H:%M')}",
+            f"{c('occurrences')}: {occurrences}",
+        ]
+        if period:
+            hover_lines.append(f"{c('period')}: {period}")
+        fig.add_trace(
+            go.Bar(
+                orientation="h",
+                base=[start_dt],
+                x=[(end_dt - start_dt).total_seconds() * 1000],
+                y=[slot["_y"]],
+                width=BAR_FRACTION,
+                marker=dict(
+                    color=palette_lookup[color_key],
+                    pattern=dict(shape="/" if slot["exam"] else ""),
+                ),
+                name=color_key,
+                legendgroup=color_key,
+                showlegend=show_legend,
+                text=slot["short_label"],
+                textposition="inside",
+                insidetextanchor="start",
+                textfont=dict(size=11),
+                hovertemplate="<br>".join(hover_lines) + "<extra></extra>",
+            )
+        )
+
+    fig.update_yaxes(
+        tickmode="array",
+        tickvals=tickvals,
+        ticktext=ticktext,
+        autorange="reversed",
+        showgrid=False,
+    )
+    fig.update_xaxes(type="date", tickformat="%H:%M", title=t("chart.xaxis_time"))
+    fig.update_layout(
+        height=max(420, int(y_cursor * 48) + 110),
+        margin=dict(l=10, r=10, t=20, b=90),
+        showlegend=(color_mode != "single"),
+        legend_title_text=t("chart.legend_modules"),
+        barmode="overlay",
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.18,
+            xanchor="left",
+            x=0,
+            entrywidth=160,
+            entrywidthmode="pixels",
+        ),
+    )
+    return _apply_chart_theme(fig)
+
+
 def _weekday_bar_figure(modules: List[Any], color_sequence: list[str] | None = None):
     """Simple histogram of row counts per weekday (relying on px.bar's
     implicit count-of-occurrences when no y is given), in Monday-first
@@ -5345,10 +5541,20 @@ def render_timetable(modules: List) -> None:
                 "color_mode": [
                     (t("chart.color_mode_multi"), "multi"),
                     (t("chart.color_mode_single"), "single"),
-                ]
+                ],
+                # "lanes" is the new side-by-side calendar-style layout for
+                # overlapping sessions (docs/UX-OPTIMIERUNGEN-README.md
+                # Punkt 2); "stacked" is the original _weekly_timeline_figure()
+                # view, kept available side by side at the user's explicit
+                # request for comparison before any decision to remove it.
+                "layout_mode": [
+                    (t("chart.layout_mode_stacked"), "stacked"),
+                    (t("chart.layout_mode_lanes"), "lanes"),
+                ],
             },
         )
         color_mode = extra_choices.get("color_mode", "multi")
+        layout_mode = extra_choices.get("layout_mode", "stacked")
 
         # "At a glance" stat row, computed from the same slot aggregation
         # the chart itself uses (_weekly_timeline_slots) - answers "how
@@ -5376,7 +5582,10 @@ def render_timetable(modules: List) -> None:
                     help=t("timetable.summary.busiest_day_help", count=weekday_counts[busiest_day]),
                 )
 
-        fig = _weekly_timeline_figure(filtered_modules, color_mode=color_mode, color_sequence=palette)
+        if layout_mode == "lanes":
+            fig = _weekly_timeline_lanes_figure(filtered_modules, color_mode=color_mode, color_sequence=palette)
+        else:
+            fig = _weekly_timeline_figure(filtered_modules, color_mode=color_mode, color_sequence=palette)
         if fig is not None:
             st.plotly_chart(fig, use_container_width=True)
         else:
