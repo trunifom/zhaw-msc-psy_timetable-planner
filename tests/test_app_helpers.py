@@ -480,6 +480,46 @@ def test_daily_load_headline_none_without_dated_rows():
     assert app._daily_load_headline([undated]) is None
 
 
+# --- _guided_flow_step_statuses: compact step-progress indicator ---------
+#
+# Implements docs/UX-OPTIMIERUNGEN-README.md's Hauptpunkt 4. Only the pure
+# status logic is tested here; the rendering half
+# (_render_step_progress_indicator) is st.markdown-based UI and, per this
+# module's own docstring, is verified manually/via Playwright instead.
+# The function takes plain booleans (not st.session_state) by design - see
+# its own docstring for why - so no monkeypatching of session_state is
+# needed here at all.
+
+def test_guided_flow_step_statuses_before_any_upload():
+    statuses = [status for _label, status in app._guided_flow_step_statuses(False, False, False)]
+    assert statuses == ["current", "upcoming", "upcoming", "upcoming"]
+
+
+def test_guided_flow_step_statuses_after_upload_before_selection():
+    statuses = [status for _label, status in app._guided_flow_step_statuses(True, False, False)]
+    assert statuses == ["done", "current", "upcoming", "upcoming"]
+
+
+def test_guided_flow_step_statuses_after_selection_before_finalizing():
+    statuses = [status for _label, status in app._guided_flow_step_statuses(True, True, False)]
+    assert statuses == ["done", "done", "current", "upcoming"]
+
+
+def test_guided_flow_step_statuses_after_finalizing():
+    statuses = [status for _label, status in app._guided_flow_step_statuses(True, True, True)]
+    assert statuses == ["done", "done", "done", "current"]
+
+
+def test_guided_flow_step_statuses_labels_are_translated_and_ordered():
+    labels = [label for label, _status in app._guided_flow_step_statuses(True, True, True)]
+    assert labels == [
+        app.t("app.step_progress.upload"),
+        app.t("app.step_progress.select"),
+        app.t("app.step_progress.review"),
+        app.t("app.step_progress.export"),
+    ]
+
+
 # --- _semester_week_groups: the "list (by week)" drill-down's data -------
 #
 # The rendering half (_render_semester_week_list) is st.*-based UI and,

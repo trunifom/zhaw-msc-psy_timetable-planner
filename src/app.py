@@ -6445,6 +6445,87 @@ def render_raw_data() -> None:
 # ==========================================
 # 5. MAIN APPLICATION CONTROLLER
 # ==========================================
+def _guided_flow_step_statuses(has_file: bool, has_selection: bool, is_finalized: bool) -> list[tuple[str, str]]:
+    """
+    (translated label, status) pairs for the four conceptual stages of the
+    whole upload-to-export flow - "1 Datei hochladen" -> "2 Module wählen"
+    -> "3 Plan prüfen" -> "4 Exportieren" - where `status` is one of "done"/
+    "current"/"upcoming". This is the data behind the compact step-progress
+    indicator (see _render_step_progress_indicator(), settings.
+    SHOW_STEP_PROGRESS_INDICATOR, and docs/UX-OPTIMIERUNGEN-README.md's
+    Hauptpunkt 4).
+
+    Takes the three flags as plain booleans rather than reading
+    st.session_state directly - `has_selection` in particular can only be
+    known once render_guided_planning() has returned THIS rerun (it lives
+    inside a tab further down main()'s script), so computing it from
+    session_state at this function's own call site would hit the exact
+    same "derived value read before whatever updates it has run this
+    rerun" staleness this file's ui_theme/ui_language early-bootstrap code
+    already documents and works around elsewhere. Pure booleans sidestep it
+    entirely (the caller simply passes the freshly-known value) and make
+    this trivially unit-testable without a real Streamlit session - see
+    tests/test_app_helpers.py.
+
+    Export has no further "done" state of its own in this app (nothing
+    records "an export button was actually clicked") - it simply becomes
+    "current" once review is done, and stays the last stage either way.
+    """
+    labels = (
+        t("app.step_progress.upload"),
+        t("app.step_progress.select"),
+        t("app.step_progress.review"),
+        t("app.step_progress.export"),
+    )
+    if not has_file:
+        statuses = ("current", "upcoming", "upcoming", "upcoming")
+    elif not has_selection:
+        statuses = ("done", "current", "upcoming", "upcoming")
+    elif not is_finalized:
+        statuses = ("done", "done", "current", "upcoming")
+    else:
+        statuses = ("done", "done", "done", "current")
+    return list(zip(labels, statuses))
+
+
+def _render_step_progress_indicator(slot: Any, has_file: bool, has_selection: bool, is_finalized: bool) -> None:
+    """
+    Fill `slot` (an `st.empty()` placeholder, reserved near the top of the
+    page, right under the Quickstart card - see main()) with the compact,
+    named step-progress indicator ("1 Datei hochladen -> 2 Module wählen ->
+    3 Plan prüfen -> 4 Exportieren") - lets a student see at a glance where
+    they are in the overall upload-to-export flow, per NN/g "Progress
+    Indicators" guidance (named steps, not a bare percentage) and
+    docs/UX-OPTIMIERUNGEN-README.md's Hauptpunkt 4.
+
+    Called from main() AFTER render_guided_planning() has returned (so
+    `has_selection` reflects THIS rerun, not the previous one - see
+    _guided_flow_step_statuses()'s docstring), but the placeholder's own
+    position in the page stays wherever `st.empty()` originally reserved
+    it, i.e. near the top - the standard Streamlit pattern for "show this
+    early, fill it with data that's only known later in the same run".
+
+    Deliberately ADDITIVE, not a restructuring of the existing guided-
+    planning/tabs flow (see that doc entry's own status note on what
+    remains open): a student can still freely jump between tabs exactly as
+    before - nothing here gates navigation, this is purely an always-
+    visible orientation aid. Reuses badge() for the done/current pills
+    (same "never color alone" principle as elsewhere in this app - each
+    pill's own text already says "✓"/"▶", color only reinforces it); an
+    upcoming step is shown as plain muted text, no pill, so the single
+    current step still stands out at a glance.
+    """
+    pieces = []
+    for label, status in _guided_flow_step_statuses(has_file, has_selection, is_finalized):
+        if status == "done":
+            pieces.append(badge(f"✓ {label}", kind="success"))
+        elif status == "current":
+            pieces.append(badge(f"▶ {label}", kind="info"))
+        else:
+            pieces.append(f'<span style="color: var(--zp-text-muted);">{label}</span>')
+    slot.markdown(" &nbsp;→&nbsp; ".join(pieces), unsafe_allow_html=True)
+
+
 def _main_tab_specs() -> list[tuple[str, str]]:
     """
     (key, translated label) pairs for every currently-visible top-level tab,
@@ -6517,6 +6598,13 @@ def main() -> None:
             st.caption(t("app.quickstart_requirements"))
             st.info(t("app.quickstart_disclaimer"))
 
+    # Reserved here (near the top, right under the Quickstart card) but
+    # only FILLED further down, once render_guided_planning() has run and
+    # `selected_modules` reflects this rerun - see _render_step_progress_
+    # indicator()'s docstring for why st.empty() (not a direct render call
+    # here) is required to avoid a one-rerun-stale "Module wählen" status.
+    step_progress_slot = st.empty() if settings.SHOW_STEP_PROGRESS_INDICATOR else None
+
     selected_modules = st.session_state.processed_modules
 
     # Create UI Tabs for a cleaner application state.
@@ -6543,6 +6631,14 @@ def main() -> None:
         # (see render_guided_planning's docstring); the local variable here is
         # what feeds the remaining tabs within this same script run.
         selected_modules = render_guided_planning(st.session_state.processed_modules)
+
+    if step_progress_slot is not None:
+        _render_step_progress_indicator(
+            step_progress_slot,
+            has_file=bool(st.session_state.processed_modules),
+            has_selection=bool(selected_modules),
+            is_finalized=bool(st.session_state.get("planning_finalized")),
+        )
 
     # Render Content in Tabs
     with tabs_by_key["dashboard"]:

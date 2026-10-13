@@ -182,12 +182,27 @@ GitHub-Style Calendar-Heatmap-Konvention.
 
 ### 4. Sichtbarer, benannter Schritt-Fortschritt statt reiner Tab-Struktur
 
-**Status:** ⬜ Offen
+**Status:** ✅ Teilweise erledigt am 2026-10-13, 13:30 (Commit `<wird nach Commit ergänzt>`)
 
-**Problem:** Aktuell 3 unnummerierte bzw. nur implizit nummerierte Abschnitte innerhalb von
-"Geführte Planung" (Schritt 1/2/3), danach 5 gleichrangige `st.tabs()`. Kein durchgängiger,
-benannter Fortschrittsindikator über den gesamten Ablauf (Upload → Auswahl → Prüfen →
-Export).
+**Umsetzung (erster, risikoarmer Teil):** Ein kompakter, benannter Fortschrittsindikator
+("✓ 1 Datei hochladen → ▶ 2 Module wählen → 3 Plan prüfen → 4 Exportieren") erscheint jetzt
+direkt unter der Schnellstart-Karte, rein additiv — er verändert oder sperrt nichts an der
+bestehenden Tab-Navigation. Per neuem Flag `settings.SHOW_STEP_PROGRESS_INDICATOR` (Default
+`True`) umschaltbar — siehe `docs/SETTINGS-README.md`, inklusive eines dabei live gefundenen
+und behobenen Rerun-Timing-Bugs (`st.empty()`-Platzhalter-Lösung).
+
+**Noch offen (zweiter, aufwändigerer Teil):** Das Einklappen abgeschlossener Schritte zu
+einem editierbaren Einzeiler mit "Ändern"-Link (GOV.UK "Check answers"-Stil) sowie das
+Zurückführen zur passenden Stelle beim Bearbeiten eines früheren Schritts — das würde eine
+grössere Restrukturierung der bestehenden, historisch fehleranfälligen Geführte-Planung-Logik
+bedeuten und wurde bewusst zurückgestellt (höheres Regressionsrisiko, siehe
+`project-conventions`-Memory zu wiederholten Selection-Persistence-Bugs in genau diesem
+Bereich).
+
+**Problem (Ausgangslage):** 3 unnummerierte bzw. nur implizit nummerierte Abschnitte innerhalb
+von "Geführte Planung" (Schritt 1/2/3), danach 5 gleichrangige `st.tabs()`. Kein
+durchgängiger, benannter Fortschrittsindikator über den gesamten Ablauf (Upload → Auswahl →
+Prüfen → Export).
 
 **Empfehlung:**
 - Kompakter, benannter Schritt-Indikator: "1 Datei hochladen → 2 Module wählen → 3 Plan

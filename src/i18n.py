@@ -48,6 +48,10 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "app.quickstart_duration": "⏱️ Dauer: ca. 5-10 Minuten.",
         "app.quickstart_requirements": "📋 Was du brauchst: die offizielle ZHAW-Kursliste (Vorlesungsverzeichnis) für dein Programm als Excel-Datei - erhältlich über dein Studiengangsekretariat bzw. die offiziellen ZHAW-Kanäle.",
         "app.quickstart_disclaimer": "ℹ️ Diese Planung ersetzt keine Kursanmeldung - die eigentliche Anmeldung läuft weiterhin ausschliesslich über die offiziellen ZHAW-Kanäle.",
+        "app.step_progress.upload": "1 Datei hochladen",
+        "app.step_progress.select": "2 Module wählen",
+        "app.step_progress.review": "3 Plan prüfen",
+        "app.step_progress.export": "4 Exportieren",
 
         "feedback.tab_label": "Feedback geben",
         "feedback.title": "💬 Feedback, Ideen oder ein Bug?",
@@ -454,6 +458,10 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "app.quickstart_duration": "⏱️ Takes about 5-10 minutes.",
         "app.quickstart_requirements": "📋 What you need: the official ZHAW course list (Vorlesungsverzeichnis) for your program as an Excel file - available from your program office or the official ZHAW channels.",
         "app.quickstart_disclaimer": "ℹ️ This planning tool does not replace course registration - actual registration still happens exclusively through the official ZHAW channels.",
+        "app.step_progress.upload": "1 Upload file",
+        "app.step_progress.select": "2 Select modules",
+        "app.step_progress.review": "3 Review plan",
+        "app.step_progress.export": "4 Export",
 
         "feedback.tab_label": "Give feedback",
         "feedback.title": "💬 Feedback, ideas or a bug?",
@@ -860,6 +868,10 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "app.quickstart_duration": "⏱️ Durée : environ 5 à 10 minutes.",
         "app.quickstart_requirements": "📋 Ce qu'il te faut : la liste de cours officielle de la ZHAW (Vorlesungsverzeichnis) pour ton programme, au format Excel - disponible auprès du secrétariat de ta filière ou via les canaux officiels de la ZHAW.",
         "app.quickstart_disclaimer": "ℹ️ Cette planification ne remplace pas l'inscription aux cours - l'inscription elle-même se fait exclusivement via les canaux officiels de la ZHAW.",
+        "app.step_progress.upload": "1 Importer le fichier",
+        "app.step_progress.select": "2 Choisir les modules",
+        "app.step_progress.review": "3 Vérifier le plan",
+        "app.step_progress.export": "4 Exporter",
 
         "feedback.tab_label": "Donner un feedback",
         "feedback.title": "💬 Feedback, idées ou un bug ?",

@@ -36,6 +36,7 @@ allgemeines Konfigurationssystem.
 | `SHOW_EXTENDED_QUICKSTART` | `bool` | `True` | Zeigt Dauer/Voraussetzungen/Anmeldungs-Hinweis in der Schnellstart-Karte zusätzlich an. |
 | `DEFAULT_THEME` | `"light" \| "dark" \| "auto"` | `"auto"` | Start-Theme für neue Besucher:innen (Sidebar-Umschalter bleibt immer verfügbar). |
 | `CHART_TITLE_STYLE` | `"label" \| "headline"` | `"headline"` | Dashboard-Chart-Überschriften als neutrales Label oder als datengetriebene Aussage. |
+| `SHOW_STEP_PROGRESS_INDICATOR` | `bool` | `True` | Zeigt den benannten Schritt-Fortschritt ("1 Datei hochladen → …") unter der Schnellstart-Karte. |
 
 *(Diese Tabelle wächst mit jedem weiteren Flag - siehe die einzelnen
 Abschnitte unten für Details. Neue Einträge werden in dem Commit ergänzt,
@@ -189,3 +190,49 @@ Aussage berechnet / `None` ohne Daten).
 Haupt+Zusatzmodule-Konfliktszenario - alle vier Überschriften zeigen
 korrekt die berechnete Aussage (z.B. "📌 Dienstag ist dein dichtester Tag
 (2 Termine)", "📌 Grösste Überlappung: KFH1 (90 Min.)").
+
+---
+
+## `SHOW_STEP_PROGRESS_INDICATOR`
+
+**Was:** Ob direkt unter der Schnellstart-Karte ein kompakter, benannter
+Fortschrittsindikator für den gesamten Ablauf erscheint: "✓ 1 Datei
+hochladen → ▶ 2 Module wählen → 3 Plan prüfen → 4 Exportieren". Jeder
+Schritt wird anhand des bestehenden Session-Zustands (Datei hochgeladen?
+Module ausgewählt? Planung abgeschlossen?) als erledigt (✓, grün),
+aktuell (▶, blau) oder noch offen (grau, kein Icon) markiert.
+
+**Wichtig:** Rein ein Orientierungshinweis — es wird dadurch **nichts** an
+der bestehenden Navigation gesperrt oder verändert. Ein Studierender kann
+weiterhin jederzeit frei zwischen allen Tabs wechseln.
+
+**Warum:** Folgt NN/g "Progress Indicators" (benannte Schritte statt nackter
+Prozentzahl) und ist der erste, risikoarme Teil von Hauptpunkt 4 aus
+`docs/UX-OPTIMIERUNGEN-README.md`. Der aufwändigere, riskantere Teil dieser
+Empfehlung (abgeschlossene Schritte zu einem editierbaren Einzeiler mit
+"Ändern"-Link einklappen, GOV.UK "Check answers"-Stil) ist **bewusst nicht**
+Teil dieses Flags — siehe den Status-Hinweis beim entsprechenden Punkt in
+`docs/UX-OPTIMIERUNGEN-README.md`.
+
+**Technische Besonderheit (wichtig bei künftigen Änderungen):** Der
+Indikator wird über ein `st.empty()`-Platzhalter-Element gerendert, das
+früh (direkt nach der Schnellstart-Karte) reserviert, aber erst NACH
+`render_guided_planning()` mit Inhalt gefüllt wird (`app.main()`). Ohne
+diesen Umweg wäre der Status für "Module wählen" immer einen Rerun
+veraltet, da `render_guided_planning()` erst weiter unten im Skript läuft
+und `st.session_state.selected_modules` erst dort aktualisiert — ein
+klassisches, in diesem Projekt bereits an anderer Stelle (Theme-/
+Sprachumschalter) dokumentiertes Streamlit-Timing-Problem. Live mit
+Playwright gefunden und mit `st.empty()` behoben, nicht nur dokumentiert.
+
+**Code-Stelle:** `app._guided_flow_step_statuses()` (reine Logik, nimmt die
+drei Status als einfache Booleans entgegen statt `st.session_state` selbst
+zu lesen — dadurch sowohl Timing-sicher als auch ohne Mocking testbar) und
+`app._render_step_progress_indicator()` (befüllt den `st.empty()`-Slot).
+
+**Tests:** `tests/test_app_helpers.py::test_guided_flow_step_statuses_*`
+(alle vier Stadien plus Label-Reihenfolge).
+
+**Live verifiziert:** Playwright-Durchlauf durch alle vier Zustände (vor
+Upload, nach Upload, nach Auswahl, nach Finalisieren) - Indikator aktualisiert
+sich jedes Mal sofort korrekt, kein Rerun-Lag.

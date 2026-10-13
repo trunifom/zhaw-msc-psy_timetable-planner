@@ -79,6 +79,24 @@ than just adding the lines unconditionally) so pilot feedback can compare
 past" between test groups.
 """
 
+SHOW_STEP_PROGRESS_INDICATOR: bool = True
+"""
+Whether a compact, named step-progress indicator ("1 Datei hochladen ->
+2 Module wählen -> 3 Plan prüfen -> 4 Exportieren") is shown near the top of
+the app, right under the Quickstart card. Each stage is marked done/current/
+upcoming based on existing session state (file uploaded, modules selected,
+planning finalized) - purely an always-visible orientation aid; nothing
+about navigation itself is gated by it, a student can still freely jump
+between tabs exactly as before.
+
+Follows NN/g "Progress Indicators" guidance (name the steps, don't just
+show a percentage) and is the first, additive part of docs/UX-
+OPTIMIERUNGEN-README.md's Hauptpunkt 4 - the bigger, riskier part of that
+recommendation (collapsing completed steps into an editable one-liner with
+a "Change" link, GOV.UK "Check answers"-style) is intentionally NOT part of
+this flag; see that doc entry's own status note for what's still open.
+"""
+
 # ==========================================
 # Appearance
 # ==========================================
