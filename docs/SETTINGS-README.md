@@ -34,6 +34,7 @@ allgemeines Konfigurationssystem.
 | `FEEDBACK_EMAIL` | `str` | `"trug@zhaw.ch"` | Empfänger-Adresse des Feedback-Widgets (🐞-Tab). |
 | `SHOW_RAW_DATA_TAB` | `bool` | `True` | Zeigt/versteckt den "🗄️ Rohdaten"-Tab komplett. |
 | `SHOW_EXTENDED_QUICKSTART` | `bool` | `True` | Zeigt Dauer/Voraussetzungen/Anmeldungs-Hinweis in der Schnellstart-Karte zusätzlich an. |
+| `DEFAULT_THEME` | `"light" \| "dark" \| "auto"` | `"auto"` | Start-Theme für neue Besucher:innen (Sidebar-Umschalter bleibt immer verfügbar). |
 
 *(Diese Tabelle wächst mit jedem weiteren Flag - siehe die einzelnen
 Abschnitte unten für Details. Neue Einträge werden in dem Commit ergänzt,
@@ -102,3 +103,42 @@ bisherigen, kürzeren Zustand.
 **Live verifiziert:** Playwright-Screenshot in Hell- und Dunkelmodus mit
 `SHOW_EXTENDED_QUICKSTART=True` - alle drei neuen Zeilen lesbar, der
 Disclaimer als eigener `st.info`-Hinweis hervorgehoben.
+
+---
+
+## `DEFAULT_THEME`
+
+**Was:** Welches Theme eine neue Besucherin/ein neuer Besucher beim allerersten
+Laden sieht, bevor sie/er den Hell/Dunkel-Umschalter in der Sidebar
+überhaupt angefasst hat. Der manuelle Umschalter selbst bleibt **immer**
+verfügbar, unabhängig von diesem Flag - es wird nur der Startpunkt
+bestimmt.
+
+- `"light"`: immer hell starten (ursprüngliches, festes Verhalten).
+- `"dark"`: immer dunkel starten.
+- `"auto"` (Default): versucht, die Hell/Dunkel-Einstellung des
+  Betriebssystems/Browsers über Streamlits `st.context.theme.type` zu
+  übernehmen; fällt auf `"light"` zurück, falls dieses Signal (noch) nicht
+  verfügbar ist (bekannte Streamlit-Einschränkung beim allerersten
+  Skript-Durchlauf einer Session).
+
+**Warum `"auto"` empfohlen wird:** UX-Recherche (siehe
+`docs/UX-OPTIMIERUNGEN-README.md`, Zusatzempfehlung B, NN/g-Quelle) zeigt,
+dass Nutzer:innen Dark Mode als systemweite Einstellung erwarten, nicht als
+etwas, das sie pro App erneut einstellen müssen.
+
+**Code-Stelle:** `app._resolve_default_theme()` liest dieses Flag und
+`st.context.theme.type`; aufgerufen an beiden Bootstrap-Stellen für
+`st.session_state.ui_theme` (dem frühen CSS-Bootstrap-Block am
+Dateianfang und in `init_session_state()` - beide müssen bei einer
+künftigen Änderung konsistent gehalten werden, siehe dortige Kommentare).
+
+**Tests:** `tests/test_app_helpers.py::test_resolve_default_theme_*`
+(deckt alle drei Flag-Werte sowie den Fallback ab, wenn `st.context.theme.type`
+`None` ist).
+
+**Live verifiziert:** Playwright mit `color_scheme="dark"`/`"light"`
+Browser-Emulation bei `DEFAULT_THEME="auto"` - App startet jeweils im
+passenden Theme. Zusätzlich mit `DEFAULT_THEME="dark"` bei einem
+hell-präferierenden Browser - App startet trotzdem dunkel (fester Wert
+gewinnt über die Browser-Präferenz).

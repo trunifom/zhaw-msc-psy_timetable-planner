@@ -332,12 +332,21 @@ Live-Test per Playwright in Hell- und Dunkelmodus — alle drei neuen Zeilen gut
 
 ### B. Theme-Default auf OS-Einstellung statt festem "light"-Default
 
-**Status:** ⬜ Offen
+**Status:** ✅ Erledigt am 2026-10-13, 11:50 (Commit `<wird nach Commit ergänzt>`)
 
-NN/g: Nutzer erwarten Dark Mode als Systemeinstellung (`prefers-color-scheme`), nicht als
-manuell zu findenden In-App-Toggle. Aktuell bootstrapped `ui_theme` fest auf `"light"`
-(siehe `project-overview`-Memory — zwei Bootstrap-Stellen in `app.py` beachten, falls dies
-geändert wird). Toggle als niedrigprioritäre Zusatzoption in der Sidebar beibehalten.
+**Umsetzung:** Neue, pure Funktion `app._resolve_default_theme()` plus Flag
+`settings.DEFAULT_THEME` (`"light" | "dark" | "auto"`, Default `"auto"`) - bei `"auto"` wird
+Streamlits `st.context.theme.type` (die vom Browser/OS übernommene Hell/Dunkel-Präferenz)
+verwendet, mit Fallback auf `"light"`, falls dieses Signal noch nicht verfügbar ist. Beide
+bisherigen Bootstrap-Stellen für `ui_theme` (früher Block vor dem CSS-Setup,
+`init_session_state()`) rufen jetzt diese Funktion auf, statt den String `"light"` hart zu
+verdrahten. Der manuelle Sidebar-Umschalter bleibt unverändert immer verfügbar.
+
+Verifiziert: `py_compile` + `pytest -q` (262/262 grün, 4 neue Tests für
+`_resolve_default_theme()`) im korrekten Conda-Env, sowie Live-Test per Playwright mit
+Browser-Emulation (`color_scheme="dark"`/`"light"`) — die App startet bei `DEFAULT_THEME=
+"auto"` jeweils im passenden Theme, und bei einem fest gesetzten Wert (z.B. `"dark"`) auch
+unabhängig von der Browser-Präferenz.
 
 **Quellen:** NN/g "Dark Mode: Users' Issues" (nngroup.com/articles/dark-mode-users-issues).
 

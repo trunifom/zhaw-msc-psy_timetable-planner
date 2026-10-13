@@ -27,6 +27,8 @@ docs/SETTINGS-README.md for the full list with screenshots/context and the
 "what to do once a flag is settled" checklist.
 """
 
+from typing import Literal
+
 # ==========================================
 # Feedback
 # ==========================================
@@ -75,4 +77,30 @@ reverts to the original, shorter card text only - kept as a flag (rather
 than just adding the lines unconditionally) so pilot feedback can compare
 "does the extra text actually get read/help, or is it just more to scroll
 past" between test groups.
+"""
+
+# ==========================================
+# Appearance
+# ==========================================
+
+ThemeDefault = Literal["light", "dark", "auto"]
+
+DEFAULT_THEME: ThemeDefault = "auto"
+"""
+The theme ("light"/"dark") a first-time visitor sees before ever touching
+the sidebar light/dark toggle. The manual toggle itself always remains
+available regardless of this setting - this only picks the STARTING point
+for a brand-new session.
+- "light" / "dark": always start every visitor in that theme (the app's
+  original, fixed behavior was "light").
+- "auto": try to match the browser/OS's own light/dark preference via
+  Streamlit's `st.context.theme.type`, falling back to "light" if that
+  signal isn't available yet - a known Streamlit limitation on the very
+  first script run of a session (see app._resolve_default_theme()'s
+  docstring for the exact fallback rule).
+
+Recommended/default per the UX research behind docs/UX-OPTIMIERUNGEN-
+README.md's "Zusatzempfehlung B" (NN/g: users treat dark mode as a
+system-wide setting they expect apps to respect, not something to
+re-toggle per app).
 """

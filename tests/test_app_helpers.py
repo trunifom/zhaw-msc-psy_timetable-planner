@@ -505,3 +505,33 @@ def test_main_tab_specs_drops_raw_tab_when_disabled(monkeypatch):
     keys = [key for key, _label in app._main_tab_specs()]
     assert keys == ["guided", "dashboard", "timetable", "conflicts"]
     assert "raw" not in keys
+
+
+# --- _resolve_default_theme: settings.DEFAULT_THEME ("auto"/"light"/"dark") --
+
+def test_resolve_default_theme_fixed_light_ignores_context(monkeypatch):
+    monkeypatch.setattr(app.settings, "DEFAULT_THEME", "light")
+    assert app._resolve_default_theme("dark") == "light"
+    assert app._resolve_default_theme(None) == "light"
+
+
+def test_resolve_default_theme_fixed_dark_ignores_context(monkeypatch):
+    monkeypatch.setattr(app.settings, "DEFAULT_THEME", "dark")
+    assert app._resolve_default_theme("light") == "dark"
+    assert app._resolve_default_theme(None) == "dark"
+
+
+def test_resolve_default_theme_auto_follows_context_signal(monkeypatch):
+    monkeypatch.setattr(app.settings, "DEFAULT_THEME", "auto")
+    assert app._resolve_default_theme("dark") == "dark"
+    assert app._resolve_default_theme("light") == "light"
+
+
+def test_resolve_default_theme_auto_falls_back_to_light_without_signal(monkeypatch):
+    # Streamlit's st.context.theme.type is None before a real browser
+    # background-color signal is known (typically the very first script run
+    # of a brand-new session) - must not crash and must fall back to the
+    # app's original fixed default.
+    monkeypatch.setattr(app.settings, "DEFAULT_THEME", "auto")
+    assert app._resolve_default_theme(None) == "light"
+    assert app._resolve_default_theme("something_unexpected") == "light"

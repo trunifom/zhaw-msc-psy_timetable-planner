@@ -96,6 +96,33 @@ except ImportError as e:
     st.error(get_text("de", "system.backend_missing", error=e))
 
 
+def _resolve_default_theme(context_theme_type: Optional[str] = None) -> str:
+    """
+    Decide which theme ("light"/"dark") a brand-new session should
+    bootstrap into, per settings.DEFAULT_THEME (see src/settings.py for the
+    full rationale - this implements Zusatzempfehlung B of
+    docs/UX-OPTIMIERUNGEN-README.md):
+    - settings.DEFAULT_THEME == "light"/"dark": always that value, every
+      visitor, ignoring `context_theme_type` entirely.
+    - settings.DEFAULT_THEME == "auto": use `context_theme_type` when it is
+      one of "light"/"dark"; anything else (notably `None`, which
+      `st.context.theme.type` returns before Streamlit has a real
+      background-color signal yet - typically the very first script run of
+      a brand-new session) falls back to "light", matching this app's
+      original fixed default.
+
+    `context_theme_type` is accepted as a plain parameter (the caller passes
+    `st.context.theme.type`) rather than this function reading `st.context`
+    itself, purely so the decision logic is unit-testable without a real
+    Streamlit session - see tests/test_app_helpers.py.
+    """
+    if settings.DEFAULT_THEME in ("light", "dark"):
+        return settings.DEFAULT_THEME
+    if context_theme_type in ("light", "dark"):
+        return context_theme_type
+    return "light"
+
+
 # ==========================================
 # 1. PAGE CONFIGURATION & DESIGN SYSTEM
 # ==========================================
@@ -112,12 +139,12 @@ st.set_page_config(
 # This minimal, idempotent bootstrap breaks that chicken-and-egg problem
 # without reordering the whole file; init_session_state() re-applies the
 # same guarded assignment below for documentation completeness (harmless -
-# `if key not in session_state` makes both calls safe together). Default is
-# "light" (product decision - most students' first impression should be the
-# lighter, more familiar-looking theme); dark stays one click away via the
-# sidebar toggle.
+# `if key not in session_state` makes both calls safe together). The actual
+# default ("light", "dark", or inferred from the browser/OS) is decided by
+# _resolve_default_theme() per settings.DEFAULT_THEME; dark always stays one
+# click away via the sidebar toggle regardless of this setting.
 if "ui_theme" not in st.session_state:
-    st.session_state.ui_theme = "light"
+    st.session_state.ui_theme = _resolve_default_theme(st.context.theme.type)
 
 # Keep ui_theme in sync with the sidebar toggle's own widget state BEFORE
 # the CSS is generated below. Without this, toggling the theme would look
@@ -702,7 +729,7 @@ def init_session_state() -> None:
     if 'ui_language' not in st.session_state:
         st.session_state.ui_language = "de"
     if 'ui_theme' not in st.session_state:
-        st.session_state.ui_theme = "light"
+        st.session_state.ui_theme = _resolve_default_theme(st.context.theme.type)
 
 
 def t(key: str, **kwargs: object) -> str:
