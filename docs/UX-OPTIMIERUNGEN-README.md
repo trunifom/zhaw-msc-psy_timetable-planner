@@ -313,7 +313,7 @@ Material 3 Accessibility Blog (m3.material.io/blog/data-visualization-accessibil
 
 ### A. Kurzer Start-Screen vor Schritt 1
 
-**Status:** ✅ Erledigt am 2026-10-13, 11:15 (Commit `<wird nach Commit ergänzt>`)
+**Status:** ✅ Erledigt am 2026-10-13, 11:15 (Commit `cf0041b9`)
 
 **Umsetzung:** Die bestehende Quickstart-Karte (`app.purpose_text`/`app.quickstart_text`)
 wurde um drei GOV.UK-Start-Seiten-Elemente ergänzt: geschätzte Dauer ("ca. 5-10 Minuten"),
