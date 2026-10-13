@@ -39,7 +39,20 @@ import re
 import plotly.express as px
 import plotly.graph_objects as go
 from i18n import get_text
-import settings
+# Aliased on import (not "import app_settings" + rename every call site):
+# every `settings.FOO` reference elsewhere in this file stays correct as-is.
+# Must be named app_settings.py, NOT settings.py, despite every docstring/
+# comment elsewhere in this file and in docs/SETTINGS-README.md still
+# saying "settings.py" for readability - a plain `src/settings.py` module
+# collides with the pre-existing top-level settings/ directory (see
+# data_loader.py's ZUSATZMODULE_ALLOWLIST_PATH). Reproduced live on
+# Streamlit Community Cloud: `import settings` there resolved to that
+# directory as an empty implicit namespace package instead of this file,
+# so every `settings.<FLAG>` access raised AttributeError - it happened to
+# work locally only because this project's conda env / launch setup put
+# src/ ahead of the repo root on sys.path, which Streamlit Cloud's own
+# bootstrapping does not reliably do the same way.
+import app_settings as settings
 
 # ==========================================
 # 0. LOGGING

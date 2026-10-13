@@ -1,8 +1,20 @@
-# Settings / Feature Flags (`src/settings.py`)
+# Settings / Feature Flags (`src/app_settings.py`)
 
-Dieses Dokument beschreibt jedes Flag in `src/settings.py` - der zentralen
-Datei, mit der sich Pilot-/Test-Varianten der App einschalten lassen, ohne
-in `app.py` nach der richtigen Stelle suchen zu müssen.
+Dieses Dokument beschreibt jedes Flag in `src/app_settings.py` - der
+zentralen Datei, mit der sich Pilot-/Test-Varianten der App einschalten
+lassen, ohne in `app.py` nach der richtigen Stelle suchen zu müssen.
+
+**Warum `app_settings.py` und nicht `settings.py`:** Ein Modul namens
+`settings.py` würde mit dem bereits bestehenden Ordner `settings/` im
+Repo-Root kollidieren (enthält `zusatzmodule_allowlist.json`, von
+`data_loader.py` per Dateipfad gelesen, nicht als Python-Import). Das hat
+auf Streamlit Community Cloud live einen `AttributeError` verursacht -
+`import settings` löste dort auf den leeren Ordner als implizites
+Namespace-Package auf statt auf unsere Datei, da Cloud und lokale
+Entwicklungsumgebung den Python-Modulpfad unterschiedlich auflösen. In
+`app.py` steht das Modul trotzdem überall als `settings` zur Verfügung
+(`import app_settings as settings`), jeder `settings.FOO`-Aufruf im Code
+bleibt also unverändert - nur der Dateiname ist anders.
 
 **Hintergrund:** Die App wird mit mehreren Testgruppen erprobt. Einige
 UI/UX-Entscheidungen sind noch nicht endgültig entschieden (siehe
@@ -10,17 +22,17 @@ UI/UX-Entscheidungen sind noch nicht endgültig entschieden (siehe
 soll, oder ob Chart-Titel als neutrales Label oder als zugespitzte Aussage
 ("Dienstag ist dein vollster Tag") formuliert werden. Statt für jede
 Testrunde Code zu ändern, wird so ein offenes Detail als Flag in
-`src/settings.py` abgelegt.
+`src/app_settings.py` abgelegt.
 
-**Anwendung:** Wert in `src/settings.py` ändern, speichern, App neu starten
-(`streamlit run src/app.py`). Ein Flag wird pro Skript-Rerun einmal
+**Anwendung:** Wert in `src/app_settings.py` ändern, speichern, App neu
+starten (`streamlit run src/app.py`). Ein Flag wird pro Skript-Rerun einmal
 gelesen - kein Cache-Leeren nötig. Um zwei Varianten gleichzeitig mit zwei
 Testgruppen zu vergleichen: zwei ausgecheckte Kopien des Repos mit
-unterschiedlichem `settings.py`-Inhalt betreiben (z.B. über zwei
+unterschiedlichem `app_settings.py`-Inhalt betreiben (z.B. über zwei
 Git-Branches), nicht `app.py` duplizieren.
 
-**Wenn eine Frage entschieden ist:** Flag aus `settings.py` entfernen und
-das gewählte Verhalten direkt in `app.py` fest verdrahten, statt eine
+**Wenn eine Frage entschieden ist:** Flag aus `app_settings.py` entfernen
+und das gewählte Verhalten direkt in `app.py` fest verdrahten, statt eine
 Konfigurationsoption dauerhaft stehen zu lassen, die sich nie wieder ändert.
 Diese Datei ist für aktive, noch offene Entscheidungen gedacht - kein
 allgemeines Konfigurationssystem.

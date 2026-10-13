@@ -1,7 +1,23 @@
 """
 Central, single-file feature-flag/settings module for the ZHAW timetable
-planner (src/app.py imports this as `import settings`, flat-import style -
-same convention as models.py/data_loader.py/scheduler.py/export.py/i18n.py).
+planner (src/app.py imports this as `import app_settings as settings` -
+every `settings.FOO` reference elsewhere in app.py stays unchanged either
+way; flat-import style, same convention as models.py/data_loader.py/
+scheduler.py/export.py/i18n.py).
+
+Named `app_settings.py`, NOT `settings.py`, even though it still reads as
+"the settings module" everywhere else (including this docstring's own
+prose below and docs/SETTINGS-README.md) - a plain `settings.py` here
+collides with the pre-existing top-level `settings/` directory (holds
+`zusatzmodule_allowlist.json`, read by data_loader.py by file path, not as
+a Python import). `import settings` resolved to that directory as an
+empty implicit namespace package on Streamlit Community Cloud (every
+`settings.<FLAG>` access raised `AttributeError`), while happening to work
+locally only because of this project's own sys.path ordering - see
+app.py's import-site comment for the full story. Don't rename this file
+back to `settings.py` without first resolving that name collision for
+good (e.g. by moving the `settings/` directory itself to something like
+`config/`).
 
 Why this file exists: the app is being pilot-tested with several groups of
 students, and some UI/UX decisions here are still genuinely open questions
