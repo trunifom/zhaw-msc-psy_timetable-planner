@@ -54,3 +54,25 @@ day; kept behind this flag rather than deleted since it's still useful when
 troubleshooting a specific student's upload. Read by app.py's
 `_main_tab_specs()`.
 """
+
+# ==========================================
+# Onboarding / first screen
+# ==========================================
+
+SHOW_EXTENDED_QUICKSTART: bool = True
+"""
+Whether the "🚀 Schnellstart"-Karte at the very top of the app (the first
+thing a visitor sees, before any upload) includes three extra lines beyond
+its original short purpose/3-step text: an estimated time-to-complete, what
+file is needed and where to get it, and an explicit "this is not a course
+registration" disclaimer.
+
+`True` (new, extended) follows the GOV.UK Design System's "start page"
+pattern (docs/UX-OPTIMIERUNGEN-README.md, Zusatzempfehlung A) - state
+roughly how long the task takes and what the visitor needs before they
+start, and make unmistakably clear what the tool does NOT do. `False`
+reverts to the original, shorter card text only - kept as a flag (rather
+than just adding the lines unconditionally) so pilot feedback can compare
+"does the extra text actually get read/help, or is it just more to scroll
+past" between test groups.
+"""

@@ -6405,6 +6405,16 @@ def main() -> None:
     with card("app-quickstart", "🚀", t("app.quickstart_title")):
         st.markdown(t("app.purpose_text"))
         st.caption(t("app.quickstart_text"))
+        # GOV.UK-style "start page" additions (docs/UX-OPTIMIERUNGEN-
+        # README.md, Zusatzempfehlung A): roughly how long this takes, what
+        # file is needed and where to get it, and an explicit "this is not
+        # a course registration" disclaimer - toggleable via settings.
+        # SHOW_EXTENDED_QUICKSTART (see that flag's docstring) so pilot
+        # feedback can compare against the original, shorter card text.
+        if settings.SHOW_EXTENDED_QUICKSTART:
+            st.caption(t("app.quickstart_duration"))
+            st.caption(t("app.quickstart_requirements"))
+            st.info(t("app.quickstart_disclaimer"))
 
     selected_modules = st.session_state.processed_modules
 

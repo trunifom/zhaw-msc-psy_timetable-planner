@@ -313,14 +313,17 @@ Material 3 Accessibility Blog (m3.material.io/blog/data-visualization-accessibil
 
 ### A. Kurzer Start-Screen vor Schritt 1
 
-**Status:** ⬜ Offen
+**Status:** ✅ Erledigt am 2026-10-13, 11:15 (Commit `<wird nach Commit ergänzt>`)
 
-Analog GOV.UK "Start using a service"-Pattern: 1 Satz was das Tool tut, ca. Zeitaufwand
-("dauert ca. 5-10 Minuten"), was gebraucht wird ("die offizielle ZHAW-Modulliste als Excel"),
-und explizit klarstellen, dass die Planung hier **keine Kursanmeldung** ersetzt (Vorbild:
-diverse universitäre Schedule-Builder, die das explizit so formulieren). Aktuell nur als
-Quickstart-Karte vorhanden (`app.purpose_text`/`app.quickstart_text`), kann um diese Punkte
-ergänzt werden.
+**Umsetzung:** Die bestehende Quickstart-Karte (`app.purpose_text`/`app.quickstart_text`)
+wurde um drei GOV.UK-Start-Seiten-Elemente ergänzt: geschätzte Dauer ("ca. 5-10 Minuten"),
+benötigte Datei + Bezugsquelle ("offizielle ZHAW-Kursliste ... über dein
+Studiengangsekretariat"), und ein als `st.info` hervorgehobener Hinweis, dass die Planung
+hier **keine Kursanmeldung** ersetzt. Per neuem Flag `settings.SHOW_EXTENDED_QUICKSTART`
+(Default `True`) ein-/ausblendbar — siehe `docs/SETTINGS-README.md`.
+
+Verifiziert: `py_compile` + `pytest -q` (258/258 grün) im korrekten Conda-Env, sowie
+Live-Test per Playwright in Hell- und Dunkelmodus — alle drei neuen Zeilen gut lesbar.
 
 **Quellen:** GOV.UK "Start using a service"
 (design-system.service.gov.uk/patterns/start-using-a-service).

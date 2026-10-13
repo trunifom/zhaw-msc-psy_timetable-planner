@@ -45,6 +45,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "app.purpose_text": "Dieses Tool hilft dir, aus deiner ZHAW-Kursliste einen konfliktfreien Stundenplan zusammenzustellen: es zeigt dir zeitliche Überschneidungen frühzeitig an und du kannst deinen fertigen Plan am Ende direkt als Termine in dein persönliches Online-Kalender (z. B. Outlook, Google oder Apple Kalender) importieren.",
         "app.quickstart_title": "Schnellstart in 3 Schritten",
         "app.quickstart_text": "① Datei hochladen  ②  In der geführten Planung filtern und auswählen  ③  Konflikte prüfen und am Ende exportieren.",
+        "app.quickstart_duration": "⏱️ Dauer: ca. 5-10 Minuten.",
+        "app.quickstart_requirements": "📋 Was du brauchst: die offizielle ZHAW-Kursliste (Vorlesungsverzeichnis) für dein Programm als Excel-Datei - erhältlich über dein Studiengangsekretariat bzw. die offiziellen ZHAW-Kanäle.",
+        "app.quickstart_disclaimer": "ℹ️ Diese Planung ersetzt keine Kursanmeldung - die eigentliche Anmeldung läuft weiterhin ausschliesslich über die offiziellen ZHAW-Kanäle.",
 
         "feedback.tab_label": "Feedback geben",
         "feedback.title": "💬 Feedback, Ideen oder ein Bug?",
@@ -444,6 +447,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "app.purpose_text": "This tool helps you turn your ZHAW course list into a conflict-free timetable: it flags time overlaps early, and once you're done, you can import your finished schedule straight into your personal online calendar (e.g. Outlook, Google, or Apple Calendar).",
         "app.quickstart_title": "Quick start in 3 steps",
         "app.quickstart_text": "① Upload file  ②  Filter/select in guided planning  ③  Review conflicts and export at the end.",
+        "app.quickstart_duration": "⏱️ Takes about 5-10 minutes.",
+        "app.quickstart_requirements": "📋 What you need: the official ZHAW course list (Vorlesungsverzeichnis) for your program as an Excel file - available from your program office or the official ZHAW channels.",
+        "app.quickstart_disclaimer": "ℹ️ This planning tool does not replace course registration - actual registration still happens exclusively through the official ZHAW channels.",
 
         "feedback.tab_label": "Give feedback",
         "feedback.title": "💬 Feedback, ideas or a bug?",
@@ -843,6 +849,9 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "app.purpose_text": "Cet outil t'aide à transformer ta liste de cours ZHAW en un horaire sans conflit : il détecte tôt les chevauchements horaires et, une fois terminé, tu peux importer ton horaire directement dans ton calendrier en ligne personnel (p. ex. Outlook, Google ou Apple Calendar).",
         "app.quickstart_title": "Démarrage rapide en 3 étapes",
         "app.quickstart_text": "① Importer le fichier  ②  Filtrer/sélectionner dans la planification guidée  ③  Vérifier les conflits puis exporter.",
+        "app.quickstart_duration": "⏱️ Durée : environ 5 à 10 minutes.",
+        "app.quickstart_requirements": "📋 Ce qu'il te faut : la liste de cours officielle de la ZHAW (Vorlesungsverzeichnis) pour ton programme, au format Excel - disponible auprès du secrétariat de ta filière ou via les canaux officiels de la ZHAW.",
+        "app.quickstart_disclaimer": "ℹ️ Cette planification ne remplace pas l'inscription aux cours - l'inscription elle-même se fait exclusivement via les canaux officiels de la ZHAW.",
 
         "feedback.tab_label": "Donner un feedback",
         "feedback.title": "💬 Feedback, idées ou un bug ?",
