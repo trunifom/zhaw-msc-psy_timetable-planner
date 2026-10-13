@@ -224,7 +224,7 @@ NN/g "Progress Indicators" (nngroup.com/articles/progress-indicators), GOV.UK "C
 
 ### 5. Sprachumschalter aus der Sidebar an eine immer sichtbare Stelle
 
-**Status:** ✅ Erledigt am 2026-10-13, 14:10 (Commit `<wird nach Commit ergänzt>`)
+**Status:** ✅ Erledigt am 2026-10-13, 14:10 (Commit `8b68098a`)
 
 **Umsetzung:** Der Sprachumschalter (de/en/fr) sitzt jetzt oben rechts neben dem Titel im
 Hauptbereich (`_render_header_language_switcher()`, neue Spalten-Layout in `main()`) statt in
