@@ -486,3 +486,22 @@ def test_semester_week_groups_label_contains_iso_week_and_date_range():
     assert "KW 38" in week["label"]
     assert "14.09." in week["label"]  # the week's Monday
     assert "20.09." in week["label"]  # the week's Sunday
+
+
+# --- _main_tab_specs: settings.SHOW_RAW_DATA_TAB toggle ------------------
+#
+# The rest of main() (actually rendering st.tabs()) is UI and, per this
+# module's own docstring, not covered here - only the pure "which tabs are
+# visible, in which order" decision this helper makes is tested.
+
+def test_main_tab_specs_includes_raw_tab_by_default(monkeypatch):
+    monkeypatch.setattr(app.settings, "SHOW_RAW_DATA_TAB", True)
+    keys = [key for key, _label in app._main_tab_specs()]
+    assert keys == ["guided", "dashboard", "timetable", "conflicts", "raw"]
+
+
+def test_main_tab_specs_drops_raw_tab_when_disabled(monkeypatch):
+    monkeypatch.setattr(app.settings, "SHOW_RAW_DATA_TAB", False)
+    keys = [key for key, _label in app._main_tab_specs()]
+    assert keys == ["guided", "dashboard", "timetable", "conflicts"]
+    assert "raw" not in keys

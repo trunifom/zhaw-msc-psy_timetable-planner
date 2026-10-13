@@ -39,19 +39,7 @@ import re
 import plotly.express as px
 import plotly.graph_objects as go
 from i18n import get_text
-
-# ==========================================
-# APP SETTINGS
-# ==========================================
-# Recipient for the floating feedback widget (see _render_feedback_widget()
-# further down) - the only address feedback/bug reports get sent to (via a
-# mailto: link, no mail server involved). Kept as a single top-of-file
-# constant, deliberately separate from the (much larger) THEME_TOKENS/
-# CHART_PALETTES settings-style blocks below, so it can be found and
-# changed in seconds without needing to understand the widget's rendering
-# code - e.g. when a different person should receive feedback next
-# semester.
-FEEDBACK_EMAIL = "trug@zhaw.ch"
+import settings
 
 # ==========================================
 # 0. LOGGING
@@ -812,10 +800,11 @@ def _render_feedback_widget() -> None:
     link only ever encodes the FEEDBACK_EMAIL address plus a translated
     subject/body - no user data is sent to that API.
 
-    Recipient address: FEEDBACK_EMAIL (top of this file), not hardcoded
-    here, so it can be changed in one place without touching this function.
+    Recipient address: settings.FEEDBACK_EMAIL, not hardcoded here, so it
+    can be changed in one place (src/settings.py) without touching this
+    function.
     """
-    mailto = f"mailto:{FEEDBACK_EMAIL}?subject={quote(t('feedback.mail_subject'))}&body={quote(t('feedback.mail_body'))}"
+    mailto = f"mailto:{settings.FEEDBACK_EMAIL}?subject={quote(t('feedback.mail_subject'))}&body={quote(t('feedback.mail_body'))}"
     qr_src = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={quote(mailto, safe='')}"
 
     st.markdown(
@@ -825,9 +814,9 @@ def _render_feedback_widget() -> None:
             <div class="zp-feedback-panel">
                 <div class="zp-feedback-title">{t('feedback.title')}</div>
                 <div class="zp-feedback-text">{t('feedback.instructions')}</div>
-                <img src="{qr_src}" alt="{t('feedback.qr_alt', email=FEEDBACK_EMAIL)}" width="150" height="150" loading="lazy" />
+                <img src="{qr_src}" alt="{t('feedback.qr_alt', email=settings.FEEDBACK_EMAIL)}" width="150" height="150" loading="lazy" />
                 <div class="zp-feedback-text">{t('feedback.email_label')}<br>
-                    <span class="zp-feedback-email">{FEEDBACK_EMAIL}</span>
+                    <span class="zp-feedback-email">{settings.FEEDBACK_EMAIL}</span>
                 </div>
                 <a class="zp-feedback-btn" href="{mailto}">{t('feedback.button_label')}</a>
             </div>
@@ -6355,13 +6344,37 @@ def render_raw_data() -> None:
 # ==========================================
 # 5. MAIN APPLICATION CONTROLLER
 # ==========================================
+def _main_tab_specs() -> list[tuple[str, str]]:
+    """
+    (key, translated label) pairs for every currently-visible top-level tab,
+    in display order - "raw" is included only when settings.
+    SHOW_RAW_DATA_TAB is true (see that flag's docstring in src/settings.py).
+    Split out from main() so this inclusion/exclusion logic is unit-testable
+    without a real Streamlit session (see tests/test_app_helpers.py) - the
+    keys themselves are internal, stable identifiers (not shown anywhere),
+    used by main() to look back up the right st.tabs() context manager for
+    each tab regardless of whether "raw" ended up in the list at all.
+    """
+    specs = [
+        ("guided", t("app.tab.guided")),
+        ("dashboard", t("app.tab.dashboard")),
+        ("timetable", t("app.tab.timetable")),
+        ("conflicts", t("app.tab.conflicts")),
+    ]
+    if settings.SHOW_RAW_DATA_TAB:
+        specs.append(("raw", t("app.tab.raw")))
+    return specs
+
+
 def main() -> None:
     """
     Main application loop - Streamlit calls this (via the __main__ guard
     below) once per script rerun, i.e. on every user interaction. Assembles
-    the whole page: sidebar, title, and the five main tabs, wiring the
-    guided-planning tab's returned selection into the other four tabs so
-    they all stay consistent within a single rerun.
+    the whole page: sidebar, title, and the main tabs (see
+    _main_tab_specs() - "Rohdaten" is optional, toggled by
+    settings.SHOW_RAW_DATA_TAB), wiring the guided-planning tab's returned
+    selection into the other tabs so they all stay consistent within a
+    single rerun.
 
     Tab order/dependency: render_guided_planning() must run first (inside
     tab_guided) because its return value - the student's current selection -
@@ -6406,34 +6419,31 @@ def main() -> None:
     # the actual visible panel silently froze on "Geführte Planung" no
     # matter which tab was clicked afterwards - an explicit key fixes this
     # the same way it fixed the uploader.
-    tab_guided, tab_dashboard, tab_timetable, tab_conflicts, tab_data = st.tabs(
-        [
-            t("app.tab.guided"),
-            t("app.tab.dashboard"),
-            t("app.tab.timetable"),
-            t("app.tab.conflicts"),
-            t("app.tab.raw"),
-        ],
-        key="main_tabs",
-    )
+    #
+    # The number of tabs is not fixed - settings.SHOW_RAW_DATA_TAB can drop
+    # "Rohdaten" entirely (see _main_tab_specs()) - so tabs are looked up by
+    # key from a dict rather than unpacked positionally into named variables.
+    tab_specs = _main_tab_specs()
+    tabs = st.tabs([label for _, label in tab_specs], key="main_tabs")
+    tabs_by_key = dict(zip((key for key, _ in tab_specs), tabs))
 
-    with tab_guided:
+    with tabs_by_key["guided"]:
         # This call also writes its result to st.session_state.selected_modules
         # (see render_guided_planning's docstring); the local variable here is
         # what feeds the remaining tabs within this same script run.
         selected_modules = render_guided_planning(st.session_state.processed_modules)
 
     # Render Content in Tabs
-    with tab_dashboard:
+    with tabs_by_key["dashboard"]:
         render_dashboard(selected_modules)
 
-    with tab_timetable:
+    with tabs_by_key["timetable"]:
         if selected_modules:
             render_timetable(selected_modules)
         else:
             st.info(t("app.info.no_selection_guided"))
 
-    with tab_conflicts:
+    with tabs_by_key["conflicts"]:
         if selected_modules:
             # Recompute conflicts here (rather than reusing
             # st.session_state.conflicts, which was computed against the full
@@ -6444,8 +6454,9 @@ def main() -> None:
         else:
             render_conflict_analysis([], selected_modules, st.session_state.processed_modules)
 
-    with tab_data:
-        render_raw_data()
+    if "raw" in tabs_by_key:
+        with tabs_by_key["raw"]:
+            render_raw_data()
 
 # ==========================================
 # ENTRY POINT
