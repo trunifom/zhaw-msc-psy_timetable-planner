@@ -6009,7 +6009,12 @@ def render_timetable(modules: List) -> None:
     st.subheader(t("timetable.subheader"))
 
     if not modules:
-        st.warning(t("timetable.no_modules"))
+        # Same actionable "use guided planning first" message the caller
+        # used to show INSTEAD of calling this function at all (see main()'s
+        # comment at this tab) - kept here, after the subheader, so the tab
+        # always has a visible title regardless of whether a selection
+        # exists yet.
+        st.info(t("app.info.no_selection_guided"))
         return
 
     with card("timetable-chart", "🗓️", t("timetable.section.chart")):
@@ -6714,11 +6719,16 @@ def main() -> None:
     with tabs_by_key["dashboard"]:
         render_dashboard(selected_modules)
 
+    # Always call render_timetable() itself (rather than branching around it
+    # like the dashboard/conflicts tabs don't), so its st.subheader() at the
+    # top of the function always renders - see render_timetable()'s own
+    # early-return docstring note. A prior version special-cased the "no
+    # selection yet" state here with a bare st.info() call BEFORE ever
+    # reaching render_timetable(), which skipped that subheader entirely -
+    # a real, reported bug ("Wochenplan" was the only one of the four main
+    # tabs with no visible title when nothing was selected yet).
     with tabs_by_key["timetable"]:
-        if selected_modules:
-            render_timetable(selected_modules)
-        else:
-            st.info(t("app.info.no_selection_guided"))
+        render_timetable(selected_modules)
 
     with tabs_by_key["conflicts"]:
         if selected_modules:

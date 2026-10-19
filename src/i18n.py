@@ -265,7 +265,6 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "dashboard.chart.no_data": "Keine Daten für die aktuelle Auswahl/Filterung vorhanden. Prüfe die Wochentage im Diagramm-Einstellungen-Panel oben.",
 
         "timetable.subheader": "📅 Wochenplan",
-        "timetable.no_modules": "Keine ausgewählten Termine verfügbar.",
         "timetable.caption": "Die Timeline zeigt eine typische Woche nach Uhrzeit, nicht die genauen Kalendertermine - die findest du in der Tabelle weiter unten. So erkennst du Lücken und Kollisionen sofort.",
         "timetable.section.chart": "Wochenübersicht",
         "timetable.summary.slots": "Termine pro Woche",
@@ -676,7 +675,6 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "dashboard.chart.no_data": "No data available for the current selection/filter. Check the weekdays in the chart settings panel above.",
 
         "timetable.subheader": "📅 Weekly Schedule",
-        "timetable.no_modules": "No selected items available.",
         "timetable.caption": "The timeline shows a typical week by time of day, not exact calendar dates - find those in the table further down. This makes gaps and collisions easy to spot at a glance.",
         "timetable.section.chart": "Weekly overview",
         "timetable.summary.slots": "Sessions per week",
@@ -1087,7 +1085,6 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "dashboard.chart.no_data": "Aucune donnée disponible pour la sélection/le filtre actuel. Vérifiez les jours de la semaine dans le panneau des paramètres du graphique ci-dessus.",
 
         "timetable.subheader": "📅 Planning hebdomadaire",
-        "timetable.no_modules": "Aucun élément sélectionné disponible.",
         "timetable.caption": "La timeline montre une semaine type par heure, pas les dates de calendrier exactes - tu les trouveras dans le tableau plus bas. Cela permet de repérer rapidement les trous et les conflits.",
         "timetable.section.chart": "Vue hebdomadaire",
         "timetable.summary.slots": "Séances par semaine",
