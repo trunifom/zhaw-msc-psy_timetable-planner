@@ -1098,7 +1098,18 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
             # No sheet could be parsed into the required schema.
             if last_error is not None:
                 raise last_error
-            raise DataLoaderError(t("upload.no_sheet"))
+            # `i18n_key=` (not a pre-translated `message=`) matches the
+            # convention every other DataLoaderError raise in this codebase
+            # follows (see data_loader.py's raises) - `message` stays a
+            # stable English string for server-side logging/str(exc), while
+            # `_format_user_facing_error()` picks up `i18n_key` first and
+            # shows the translation matching the CURRENT UI language. Passing
+            # `t("upload.no_sheet")` directly as `message` (the previous
+            # version) worked today only because it's displayed immediately
+            # in the same rerun, but was inconsistent with the rest of the
+            # codebase and would show the wrong language if ever logged/
+            # displayed after a language switch.
+            raise DataLoaderError("No readable worksheet found in the uploaded file.", i18n_key="upload.no_sheet")
         else:
             st.error(t("upload.unsupported"))
             return
