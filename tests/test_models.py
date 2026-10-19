@@ -209,6 +209,20 @@ def test_missing_attendance_percentage_becomes_none(raw):
     assert make_module(anwesenheitspflicht_prozent=raw).anwesenheitspflicht_prozent is None
 
 
+@pytest.mark.parametrize("raw", ["k.A.", "tbd", "siehe Aushang", "ca. 80%ig"])
+def test_unparseable_attendance_percentage_becomes_none_instead_of_rejecting_row(raw):
+    # Regression test: parse_attendance_percentage() used to call float(...)
+    # unguarded, so any garbled free-text value not in the explicit "no
+    # value" skip-list (e.g. "k.A." or "tbd") raised an uncaught ValueError
+    # and rejected the ENTIRE row, not just this one optional field. This is
+    # currently masked in the real upload pipeline by data_loader.py's own
+    # separate pd.to_numeric(errors="coerce") pass before Pydantic ever sees
+    # the value - but the validator is directly reachable (e.g. via
+    # make_module()/ZHAWModule() constructed directly, as here) by any
+    # future caller that doesn't go through data_loader.
+    assert make_module(anwesenheitspflicht_prozent=raw).anwesenheitspflicht_prozent is None
+
+
 # --- Helper methods / misc --------------------------------------------------
 
 def test_duration_minutes_computes_correctly():

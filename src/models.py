@@ -309,14 +309,26 @@ class ZHAWModule(BaseModel):
     @field_validator('anwesenheitspflicht_prozent', mode='before')
     @classmethod
     def parse_attendance_percentage(cls, v: Any) -> float | None:
-        """Parse attendance requirement values like '80%', '0.8', or '80'."""
+        """Parse attendance requirement values like '80%', '0.8', or '80'.
+
+        Any value that isn't a recognizable number (e.g. a garbled free-text
+        entry like "k.A." or "tbd" that isn't in the explicit "no value"
+        skip-list below) falls back to None instead of raising - this is an
+        optional field, so one unparseable cell here should not reject the
+        ENTIRE row the way an uncaught ValueError from a field validator
+        otherwise would. Mirrors the "no-op on garbage input" behavior of
+        the sibling `sanitize_optional_identifiers` validator above.
+        """
         if v is None:
             return None
         value = str(v).strip().replace(",", ".")
         if value.lower() in {"", "n/a", "na", "none", "nan"}:
             return None
         value = value.replace("%", "")
-        parsed = float(value)
+        try:
+            parsed = float(value)
+        except ValueError:
+            return None
         if 0 <= parsed <= 1:
             parsed *= 100
         return parsed
