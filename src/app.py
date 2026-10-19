@@ -1045,6 +1045,13 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
             st.session_state.selected_modules = []
             st.session_state.selected_course_bases = []
             st.session_state.selected_row_ids = []
+            # A brand-new upload invalidates any earlier "yes, I'm finished
+            # planning" confirmation from render_export_section() - without
+            # this reset, a student who finalized once would see the export
+            # buttons appear immediately for a completely new/different
+            # schedule, without ever re-ticking the checkbox (see the bug
+            # this fixes at the other three reset sites in this file).
+            st.session_state.planning_finalized = False
             st.toast(t("upload.success"), icon="✅")
             _warn_if_dates_missing(st.session_state[modules_key])
             return
@@ -1081,6 +1088,9 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
                 st.session_state.selected_modules = []
                 st.session_state.selected_course_bases = []
                 st.session_state.selected_row_ids = []
+                # See the comment at the CSV branch above for why this reset
+                # is needed here too.
+                st.session_state.planning_finalized = False
                 st.toast(t("upload.success_sheet", sheet_name=sheet_name), icon="✅")
                 _warn_if_dates_missing(st.session_state[modules_key])
                 return
@@ -5642,6 +5652,14 @@ def render_sidebar() -> None:
                 st.session_state.selected_modules = []
                 st.session_state.selected_course_bases = []
                 st.session_state.selected_row_ids = []
+                # A removed file means there is nothing left to have
+                # "finished planning" for - without this, a student who had
+                # already finalized once would see the export buttons appear
+                # immediately on their NEXT upload, without re-ticking the
+                # confirmation checkbox (render_export_section()'s own
+                # docstring calls this checkbox a "conscious yes, this is
+                # final" gate - a stale True value defeats that).
+                st.session_state.planning_finalized = False
                 # Force the Zusatzmodule uploader widget below to remount
                 # under a fresh key THIS SAME rerun (see
                 # init_session_state()'s docstring for zusatz_uploader_
@@ -5681,6 +5699,9 @@ def render_sidebar() -> None:
                     st.session_state.selected_modules = []
                     st.session_state.selected_course_bases = []
                     st.session_state.selected_row_ids = []
+                    # See the comment at the main-file-removed branch above
+                    # for why this reset is needed here too.
+                    st.session_state.planning_finalized = False
 
         # "main" (default) moves this whole section out of the sidebar
         # into its own visible card in the main area, right after the
