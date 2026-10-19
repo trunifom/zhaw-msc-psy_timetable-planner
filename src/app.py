@@ -87,7 +87,6 @@ try:
     from data_loader import load_schedule_from_dataframe, DataLoaderError
     from scheduler import find_time_conflicts, find_critical_first_session_conflicts
     from models import ZHAWModule
-    # NEU: Export-Funktionen hier in den Try-Block aufnehmen
     from export import prepare_timetable_for_export, generate_excel_download, generate_ics_download
     MODULES_AVAILABLE = True
     # Streamlit re-executes this whole script on every user interaction, but
@@ -667,9 +666,13 @@ def init_session_state() -> None:
         (see handle_file_upload).
       - processed_modules_main / processed_modules_zusatz: List[ZHAWModule]
         each - the validated rows from the main upload and, if present, the
-        optional second "Zusatzmodule" upload for Passerelle students (see
-        docs/planung/KONZEPT-passerelle-zusatzmodule.md), kept separately so
-        removing one upload doesn't require re-parsing the other.
+        optional second "Zusatzmodule" upload for Passerelle students
+        (ZHAW admits from other institutions who must additionally complete
+        Bachelor-level modules in certain semesters - the original planning
+        doc for this feature was deleted after implementation, per this
+        project's policy of removing planning docs once their content has
+        been built), kept separately so removing one upload doesn't require
+        re-parsing the other.
       - processed_modules: List[ZHAWModule] - processed_modules_main +
         processed_modules_zusatz, recomputed by _recompute_combined_modules()
         whenever either source changes. Every downstream tab/chart/export
@@ -1012,9 +1015,8 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
         uploaded_file: the file object from st.file_uploader.
         ist_zusatzmodul: False for the main schedule upload, True for the
             optional second "Zusatzmodule" upload (Passerelle students'
-            supplementary Bachelor-level modules, see
-            docs/planung/KONZEPT-passerelle-zusatzmodule.md). Determines
-            both which session-state slot (raw_data/processed_modules_main
+            supplementary Bachelor-level modules). Determines both which
+            session-state slot (raw_data/processed_modules_main
             vs. raw_data_zusatz/processed_modules_zusatz) this upload
             populates, and the ist_zusatzmodul tag on every resulting
             ZHAWModule (see data_loader.load_schedule_from_dataframe).
@@ -2057,8 +2059,7 @@ def _has_undistinguished_parallel_offerings(items: List[Any]) -> bool:
 
     Real ZHAW exports sometimes offer several parallel half-class/group
     deliveries of the same session without encoding that as a "/Gruppe A"
-    style suffix in the title at all - only the lecturer name differs (see
-    docs/planung/KONZEPT-passerelle-zusatzmodule.md section 8, risk 1; a
+    style suffix in the title at all - only the lecturer name differs (a
     live check against the real Bachelor catalog found this in ~47% of its
     same-slot multi-lecturer cases, vs. ~7% for the Master catalog). Because
     _split_course_variant() has nothing to parse in the title in that case,
@@ -2182,9 +2183,7 @@ def _zusatzmodul_marker(module: Any) -> str:
     previous "blank for Master rows" behaviour (that blank cell made it
     look like the column had simply not been filled in for those rows,
     and the previous Zusatzmodul-only badge/emoji was reported as
-    confusing - see docs/planung/KONZEPT-passerelle-zusatzmodule.md
-    section 4.2 for the original Zusatzmodule-upload concept this marker
-    is based on).
+    confusing).
     """
     return t("col.source.bsc") if getattr(module, "ist_zusatzmodul", False) else t("col.source.msc")
 
@@ -5135,9 +5134,9 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     c("period"): date_range,
                     # A module group is expected to come from exactly one
                     # source list (main vs. Zusatzmodule) - real ZHAW
-                    # Bachelor/Master Modul-Nr namespaces don't collide (see
-                    # docs/planung/KONZEPT-passerelle-zusatzmodule.md section
-                    # 8, risk 2) - so the first row's flag represents the
+                    # Bachelor/Master Modul-Nr namespaces were verified to
+                    # not collide (zero overlap across the full real BSc/MSc
+                    # catalogs) - so the first row's flag represents the
                     # whole group.
                     c("source"): _zusatzmodul_marker(items[0]),
                 }
@@ -5639,8 +5638,8 @@ def render_sidebar() -> None:
     README.md Hauptpunkt 5), the Master-module course-list upload
     ("Kursliste Mastermodule" - the file every MSc Psychology student
     needs), the optional Bachelor course-list upload for Passerelle
-    students (see docs/planung/KONZEPT-passerelle-zusatzmodule.md -
-    explicitly worded to make clear it only applies to a small group), and
+    students (explicitly worded to make clear it only applies to a small
+    group), and
     - only when settings.EXPORT_SECTION_PLACEMENT == "sidebar" (its
     original placement; the default "main" instead renders it as its own
     card in main(), see docs/UX-OPTIMIERUNGEN-README.md Hauptpunkt 6) -
@@ -5867,9 +5866,8 @@ def render_dashboard(modules: List) -> None:
             st.metric(t("dashboard.metric.lessons"), lessons_per_week)
             st.caption(t("dashboard.metric.lessons_caption", hours=hours_per_week, weeks=observed_weeks))
 
-        # Only shown when a Zusatzmodule upload actually exists (see
-        # docs/planung/KONZEPT-passerelle-zusatzmodule.md section 4.4) -
-        # checked against the full combined dataset (processed_modules_
+        # Only shown when a Zusatzmodule upload actually exists - checked
+        # against the full combined dataset (processed_modules_
         # zusatz), not `modules` (the current selection), since the tile
         # should still show "0" for a Passerelle student who uploaded a
         # Zusatzmodule list but hasn't selected any of it yet - not
@@ -6760,9 +6758,7 @@ def main() -> None:
     Tab order/dependency: render_guided_planning() must run first (inside
     tab_guided) because its return value - the student's current selection -
     is what the dashboard/timetable/conflicts tabs render; `selected_modules`
-    starts out defaulting to the full processed_modules list (so tabs have
-    something sensible to show even before guided planning has run once) and
-    is overwritten with the guided-planning result immediately after.
+    is assigned from that call's return value before any other tab reads it.
     Dashboard and conflicts additionally receive st.session_state.
     processed_modules (the full unfiltered dataset) so they can show
     "impact across everything on offer" alongside "impact on your
@@ -6819,8 +6815,6 @@ def main() -> None:
     # indicator()'s docstring for why st.empty() (not a direct render call
     # here) is required to avoid a one-rerun-stale "Module wählen" status.
     step_progress_slot = st.empty() if settings.SHOW_STEP_PROGRESS_INDICATOR else None
-
-    selected_modules = st.session_state.processed_modules
 
     # Create UI Tabs for a cleaner application state.
     # Explicit `key=` for the same reason as the sidebar file uploaders'

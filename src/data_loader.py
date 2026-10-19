@@ -589,12 +589,11 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame, ist_zusatzmodul: bool = F
             student's second, Bachelor-level module list) rather than the
             main schedule. This is set by the *caller* based on which
             upload slot the file came from - never read from the file's own
-            content - see ZHAWModule.ist_zusatzmodul and
-            docs/planung/KONZEPT-passerelle-zusatzmodule.md section 3 for
-            why: trusting a source column here would make an app-level
-            business rule dependent on the source file reliably filling
-            that column, which the rest of this module's defensive
-            sanitizing philosophy deliberately avoids.
+            content (see ZHAWModule.ist_zusatzmodul): trusting a source
+            column here would make an app-level business rule dependent on
+            the source file reliably filling that column, which the rest of
+            this module's defensive sanitizing philosophy deliberately
+            avoids.
 
     Returns:
         List[ZHAWModule]: A list of validated module objects.
@@ -625,9 +624,9 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame, ist_zusatzmodul: bool = F
                 break
 
     # Some source exports (e.g. the ZHAW Bachelor-level course catalog used
-    # by Passerelle students, see docs/planung/KONZEPT-passerelle-zusatzmodule.md
-    # section 2.2) carry a date column but no separate weekday column at
-    # all - unlike the Master catalog's "Tag" column, there's no alias to
+    # by Passerelle students) carry a date column but no separate weekday
+    # column at all - unlike the Master catalog's "Tag" column, there's no
+    # alias to
     # match. Rather than rejecting the whole file over one derivable field,
     # derive `wochentag` from `datum` here (before it's actually needed for
     # anything downstream). This is a general robustness improvement, not
