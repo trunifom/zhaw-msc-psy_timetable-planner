@@ -4650,7 +4650,22 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                             options=[t("guided.full_day"), t("guided.morning"), t("guided.afternoon")],
                         )
                     },
-                    key="blocked_day_halfday_editor",
+                    # Keyed by the actual set+order of blocked weekdays, not a
+                    # fixed string - a `st.data_editor` with a CONSTANT key
+                    # tracks edits by row POSITION, not by which weekday that
+                    # row actually represents. Without this, adding/removing
+                    # a blocked weekday (which changes `ordered_selected_
+                    # days`'s length/order) would keep the editor's existing
+                    # per-position edits attached to whatever weekday now
+                    # happens to sit at that same position, rather than
+                    # re-seeding a fresh table from `halfday_rows` - the same
+                    # class of bug already fixed elsewhere in this file via a
+                    # versioned key (see _text_filter_widget_key() and
+                    # _select_all_controls()). The weekday keys themselves are
+                    # a small, fixed, already-validated set (see
+                    # _blocking_weekday_keys()), so joining them directly
+                    # into the key string is safe.
+                    key=f"blocked_day_halfday_editor_{'_'.join(ordered_selected_days)}",
                 )
                 # Row order is preserved by data_editor (no sorting/
                 # reordering happens), so zipping back against
