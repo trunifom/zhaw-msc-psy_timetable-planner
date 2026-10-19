@@ -4718,8 +4718,25 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     absence_period_valid = False
 
         st.session_state.absence_period_enabled = has_absence_period == t("guided.yes")
-        st.session_state.absence_period_start = absence_start
-        st.session_state.absence_period_end = absence_end
+        # Only persist the period if it actually passed both checks above
+        # (valid order, inside the semester bounds) - this used to compute
+        # `absence_period_valid` and show an st.error() for an invalid
+        # range, but then stored the bad `absence_start`/`absence_end`
+        # values anyway, so every downstream consumer of these two keys
+        # (the dashboard/conflicts absence-risk warnings, the timetable's
+        # blocked-day overlay context - see _absence_settings()'s
+        # docstring) would silently compute against a backwards or
+        # out-of-semester date range instead of being told "no valid
+        # period is currently set". Storing None here instead means those
+        # consumers' existing `settings["period_start"] and settings[
+        # "period_end"]` truthiness checks correctly treat an invalid,
+        # not-yet-corrected range the same as "nothing entered yet".
+        if absence_period_valid:
+            st.session_state.absence_period_start = absence_start
+            st.session_state.absence_period_end = absence_end
+        else:
+            st.session_state.absence_period_start = None
+            st.session_state.absence_period_end = None
 
         has_absent_dates = st.radio(
             t("guided.q.absent_dates"),
