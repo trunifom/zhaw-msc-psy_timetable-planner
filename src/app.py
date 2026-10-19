@@ -692,6 +692,15 @@ def init_session_state() -> None:
         (see _module_group_key - Modul-Nr, or "BASIS::<base>" as a
         fallback) the student checked in guided planning's "module" mode
         table, persisted so the checkboxes stay selected across reruns.
+      - excluded_module_components: list of "<module key>::<family key>"
+        strings - which single-variant ("mandatory") course components
+        within an otherwise-selected module the student has opted OUT of
+        via the per-component checkbox in "module" mode (e.g. a module
+        listing several differently-named components where only some are
+        actually required, not a "/Gruppe A"-style either/or choice - see
+        render_guided_planning's "module" mode docstring). Everything is
+        included by default (opt-out, not opt-in), so this list is normally
+        empty and only grows when a student actively excludes something.
       - selected_course_bases: list of "course" selection-mode base-course
         titles (see _split_course_variant - the RAW, non-lowercased base
         title, a different key format from selected_module_keys above) the
@@ -757,6 +766,8 @@ def init_session_state() -> None:
         st.session_state.filters_initialized = False
     if 'selected_module_keys' not in st.session_state:
         st.session_state.selected_module_keys = []
+    if 'excluded_module_components' not in st.session_state:
+        st.session_state.excluded_module_components = []
     if 'selected_course_bases' not in st.session_state:
         st.session_state.selected_course_bases = []
     if 'selected_row_ids' not in st.session_state:
@@ -1060,6 +1071,7 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
             _recompute_combined_modules()
             st.session_state.selected_modules = []
             st.session_state.selected_module_keys = []
+            st.session_state.excluded_module_components = []
             st.session_state.selected_course_bases = []
             st.session_state.selected_row_ids = []
             # A brand-new upload invalidates any earlier "yes, I'm finished
@@ -1104,6 +1116,7 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
                 _recompute_combined_modules()
                 st.session_state.selected_modules = []
                 st.session_state.selected_module_keys = []
+                st.session_state.excluded_module_components = []
                 st.session_state.selected_course_bases = []
                 st.session_state.selected_row_ids = []
                 # See the comment at the CSV branch above for why this reset
@@ -2876,15 +2889,34 @@ def _is_pruefungseinsicht(module: Any) -> bool:
 _EXAM_MARKER_COLOR = "#E62154"  # ZHAW Koralle - same red used across this app's CHART_PALETTES
 
 
-def _mark_exam_sessions(fig) -> None:
+_EXAM_MARKER_COLOR_UNSELECTED = "#8a8f99"  # muted grey-blue, distinct from the plain white default outline but not as loud as the red used for a SELECTED exam
+
+
+def _mark_exam_sessions(fig, selected_index: int | None = None) -> None:
     """
-    Give exam sessions ("ist_pruefung") a distinctly thicker red marker
-    outline on a px.scatter figure built with `custom_data=["_is_exam"]`,
-    so a student can spot an exam date at a glance in any per-session chart
+    Give exam sessions ("ist_pruefung") a distinctly thicker marker outline
+    on a px.scatter figure built with `custom_data=["_is_exam", ...]`, so a
+    student can spot an exam date at a glance in any per-session chart
     without it changing the course's own fill color (which still encodes
     *which course* the session belongs to). Applied per-trace since Plotly
     Express splits one trace per color group, and marker outline color/
     width can be set as a per-point array within each trace.
+
+    `selected_index`: if given, the position within each trace's
+    `custom_data` tuple that holds an "is this session part of the
+    student's current selection" boolean. When provided, an exam gets the
+    loud red outline ONLY if it's also selected; an unselected exam (e.g.
+    a parallel course on offer but not chosen) gets a muted grey outline
+    instead - still visually distinct from a plain non-exam session, but
+    without implying "this exam concerns you" for something that doesn't.
+    Before this flag existed, _semester_grid_figure() (the guided-planning
+    Schritt-3 preview, which plots every offered session - selected and
+    not - on one grid) gave EVERY exam the same loud red ring regardless of
+    selection, which a user reported as misleading ("why are unrelated
+    exams highlighted in red?"). Other callers that only ever plot already-
+    selected sessions (e.g. _weekly_timeline_figure) can omit this
+    parameter and keep the simple "every exam is red" behavior, since there
+    is no "unselected" case to distinguish there.
     """
     for trace in fig.data:
         if trace.customdata is None:
@@ -2894,7 +2926,15 @@ def _mark_exam_sessions(fig) -> None:
             continue
         base_line_color = trace.marker.line.color or "rgba(255,255,255,0.6)"
         base_line_width = trace.marker.line.width or 1
-        trace.marker.line.color = [_EXAM_MARKER_COLOR if is_exam else base_line_color for is_exam in is_exam_flags]
+        if selected_index is None:
+            exam_colors = [_EXAM_MARKER_COLOR if is_exam else base_line_color for is_exam in is_exam_flags]
+        else:
+            is_selected_flags = [bool(row[selected_index]) for row in trace.customdata]
+            exam_colors = [
+                _EXAM_MARKER_COLOR if (is_exam and is_selected) else (_EXAM_MARKER_COLOR_UNSELECTED if is_exam else base_line_color)
+                for is_exam, is_selected in zip(is_exam_flags, is_selected_flags)
+            ]
+        trace.marker.line.color = exam_colors
         trace.marker.line.width = [3 if is_exam else base_line_width for is_exam in is_exam_flags]
 
 
@@ -3040,13 +3080,20 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
                 "_week_monday": week_monday,
                 c("weekday"): _weekday_label(module),
                 c("module"): _module_label(module),
-                "_short_code": _module_short_code(module),
+                # Only SELECTED tiles get their short code drawn on top - an
+                # unselected (grey) tile showing a white text label on top
+                # was reported as illegible clutter, and the code isn't
+                # actionable information for a session the student hasn't
+                # chosen anyway; hovering still shows the full module name
+                # for any tile, selected or not.
+                "_short_code": _module_short_code(module) if is_selected else "",
                 "_color_key": _module_legend_label(module) if is_selected else _SEMESTER_GRID_UNSELECTED_KEY,
                 c("date"): datum_value.strftime("%d.%m.%Y"),
                 c("time"): f"{module.startzeit.strftime('%H:%M')} - {module.endzeit.strftime('%H:%M')}",
                 c("room"): module.raum,
                 "_is_exam": bool(getattr(module, "ist_pruefung", False)),
                 "_is_conflict": id(module) in conflicted_ids,
+                "_is_selected": is_selected,
             }
         )
 
@@ -3075,7 +3122,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         text="_short_code",
         hover_name=c("module"),
         hover_data={c("date"): True, c("time"): True, c("room"): True, "_color_key": False, "_short_code": False},
-        custom_data=["_is_exam", "_is_conflict"],
+        custom_data=["_is_exam", "_is_conflict", "_is_selected"],
         category_orders={c("weekday"): present_weekdays, c("week"): ordered_weeks},
     )
     fig.update_traces(
@@ -3083,7 +3130,11 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         textposition="middle center",
         textfont=dict(size=10, color="white"),
     )
-    _mark_exam_sessions(fig)
+    # index 2 = "_is_selected" in custom_data above - an exam ring is only
+    # the loud red color when it's part of the student's OWN selection (see
+    # _mark_exam_sessions()'s docstring); an unselected exam still gets a
+    # visually distinct (but muted) ring rather than none at all.
+    _mark_exam_sessions(fig, selected_index=2)
     _mark_conflicted_sessions(fig)
     fig.update_layout(
         height=max(420, 42 * len(ordered_weeks) + 120),
@@ -4577,7 +4628,14 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             base title via _module_group_key), then, per selected module,
             resolve mandatory vs. choice course components (see the
             variant-family logic below - this is the most complex path).
-            Two unnumbered subsections follow only in this mode: a
+            A single-variant ("mandatory") component additionally gets its
+            own include/exclude checkbox, so a module listing several
+            differently-named, individually optional components (e.g.
+            "A11-1 Sucht"/"A11-4 Onlineberatung", where only some are
+            actually required - not a "/Gruppe A"-style either/or choice)
+            can have the unneeded ones excluded without deselecting the
+            whole module (see excluded_module_components). Two unnumbered
+            subsections follow only in this mode: a
             per-module component breakdown expander
             ("module_components_heading"), then a status table
             summarizing completeness (any open mandatory choices?) and
@@ -5201,6 +5259,15 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         # momentarily hidden by a filter still gets its full set of rows
         # resolved into `selected_modules` below - see the comment at
         # `grouped_modules_all`'s definition above.
+        #
+        # excluded_components tracks which single-variant ("mandatory")
+        # family components the student has opted OUT of (see the checkbox
+        # inside the loop below) - initialized once here from session_state
+        # and mutated in place across every module this loop iterates over,
+        # then written back once after the loop so one module's checkbox
+        # click can't accidentally clobber another module's exclusions
+        # within the same rerun.
+        excluded_components = set(st.session_state.get("excluded_module_components", []))
         for key, items in sorted(grouped_modules_all.items(), key=lambda pair: _module_group_display(pair[0], pair[1]).lower()):
             if key not in selected_keys:
                 continue
@@ -5242,6 +5309,17 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 ):
                     remaining = set(st.session_state.get("selected_module_keys", [])) - {key}
                     st.session_state.selected_module_keys = sorted(remaining)
+                    # Also drop any per-component exclusions recorded for
+                    # THIS module (keys are namespaced "<module key>::
+                    # <family key>", see excluded_components above) - they'd
+                    # otherwise sit around unused until the exact same
+                    # module/family-key combination is selected again, which
+                    # is harmless but needless clutter.
+                    remaining_exclusions = {
+                        k for k in st.session_state.get("excluded_module_components", [])
+                        if not k.startswith(f"{key}::")
+                    }
+                    st.session_state.excluded_module_components = sorted(remaining_exclusions)
                     guided_step2_card.__exit__(None, None, None)
                     st.rerun()
 
@@ -5253,23 +5331,51 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
 
                     variant_names = sorted(variants.keys())
                     if len(variant_names) == 1:
-                        # Single variant -> nothing to choose; auto-include
-                        # every row of this component ("mandatory"). This can
-                        # still hide several genuinely parallel offerings
-                        # (e.g. half-classes) if the source data only tells
-                        # them apart by lecturer, not by a "/Gruppe A" style
-                        # title suffix - see _has_undistinguished_parallel_
-                        # offerings(). We can't resolve that ambiguity here
-                        # (the source data doesn't say which one the student
-                        # is actually in), so it's only flagged, not changed.
+                        # Single variant -> nothing to CHOOSE BETWEEN, but the
+                        # student can still opt OUT of this specific component
+                        # entirely (e.g. a module listing several same-
+                        # family-but-differently-named course components,
+                        # like "A11-1 Sucht"/"A11-4 Onlineberatung", where
+                        # only some of them are actually required - the
+                        # source data doesn't encode "pick N of M", so the
+                        # student has to make that call themselves). Default
+                        # is included (opt-out, not opt-in) since the common
+                        # case - a module with exactly one lecture/seminar
+                        # component - should keep working with zero extra
+                        # clicks. The exclusion itself is tracked per
+                        # (module key, family key) pair in
+                        # excluded_module_components so it persists across
+                        # reruns and doesn't collide with a same-named family
+                        # in a different module.
                         only_variant = variant_names[0]
-                        module_selected.extend(variants[only_variant])
-                        if _has_undistinguished_parallel_offerings(variants[only_variant]):
-                            ambiguous_parallel_components.append(fam_key)
+                        exclusion_key = f"{key}::{fam_key}"
+                        is_included = st.checkbox(
+                            t("guided.include_component_checkbox"),
+                            value=exclusion_key not in excluded_components,
+                            key=f"include_component_{exclusion_key}",
+                            help=t("guided.include_component_help"),
+                        )
+                        if is_included:
+                            excluded_components.discard(exclusion_key)
+                        else:
+                            excluded_components.add(exclusion_key)
+
+                        if is_included:
+                            module_selected.extend(variants[only_variant])
+                            # This can still hide several genuinely parallel
+                            # offerings (e.g. half-classes) if the source
+                            # data only tells them apart by lecturer, not by
+                            # a "/Gruppe A" style title suffix - see
+                            # _has_undistinguished_parallel_offerings(). We
+                            # can't resolve that ambiguity here (the source
+                            # data doesn't say which one the student is
+                            # actually in), so it's only flagged, not changed.
+                            if _has_undistinguished_parallel_offerings(variants[only_variant]):
+                                ambiguous_parallel_components.append(fam_key)
                         family_rows.append(
                             {
                                 c("course_component"): fam_key,
-                                c("component_type"): t("guided.component_mandatory"),
+                                c("component_type"): t("guided.component_mandatory") if is_included else t("guided.component_excluded"),
                                 c("selection"): only_variant,
                                 c("variants"): ", ".join(variant_names),
                             }
@@ -5329,6 +5435,12 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     c("status"): t("guided.status.incomplete") if open_choices > 0 else t("guided.status.complete"),
                 }
             )
+
+        # Persist every include/exclude checkbox click from the loop above in
+        # one write, after the loop - see the comment where excluded_
+        # components was initialized for why this is done once here rather
+        # than inside the loop.
+        st.session_state.excluded_module_components = sorted(excluded_components)
 
         # Deduplicate selected modules by object identity. A single row can
         # end up added to `selected_modules` more than once here because the
@@ -5741,6 +5853,7 @@ def render_sidebar() -> None:
                 st.session_state.conflicts = []
                 st.session_state.selected_modules = []
                 st.session_state.selected_module_keys = []
+                st.session_state.excluded_module_components = []
                 st.session_state.selected_course_bases = []
                 st.session_state.selected_row_ids = []
                 # A removed file means there is nothing left to have
@@ -5789,6 +5902,7 @@ def render_sidebar() -> None:
                     _recompute_combined_modules()
                     st.session_state.selected_modules = []
                     st.session_state.selected_module_keys = []
+                    st.session_state.excluded_module_components = []
                     st.session_state.selected_course_bases = []
                     st.session_state.selected_row_ids = []
                     # See the comment at the main-file-removed branch above

@@ -293,6 +293,52 @@ def test_semester_grid_figure_marks_real_time_conflict_with_black_outline():
         assert trace.marker.line.color == (app._CONFLICT_MARKER_COLOR,)
 
 
+def test_mark_exam_sessions_with_selected_index_mutes_unselected_exams():
+    # Regression test: _semester_grid_figure() plots every offered session,
+    # selected or not, on one grid - before `selected_index` existed, EVERY
+    # exam got the same loud red ring regardless of whether the student had
+    # actually selected it, which was reported as misleading.
+    fig = go.Figure(
+        go.Scatter(
+            x=[1, 2, 3],
+            y=[1, 2, 3],
+            mode="markers",
+            marker=dict(line=dict(color="white", width=1)),
+            # (is_exam, is_conflict, is_selected)
+            customdata=[[True, False, True], [True, False, False], [False, False, True]],
+        )
+    )
+    app._mark_exam_sessions(fig, selected_index=2)
+    trace = fig.data[0]
+    assert trace.marker.line.color == (app._EXAM_MARKER_COLOR, app._EXAM_MARKER_COLOR_UNSELECTED, "white")
+    assert trace.marker.line.width == (3, 3, 1)
+
+
+def test_semester_grid_figure_gives_unselected_exam_a_muted_outline_not_red():
+    selected_exam = make_module(modulname="Kurs A/Prüfung", modul_nr="A1", datum=date(2026, 9, 14))
+    unselected_exam = make_module(modulname="Kurs B/Prüfung", modul_nr="B1", datum=date(2026, 9, 21))
+    fig, _, _ = app._semester_grid_figure([selected_exam, unselected_exam], [selected_exam])
+    colors = {color for trace in fig.data for color in trace.marker.line.color}
+    assert app._EXAM_MARKER_COLOR in colors
+    assert app._EXAM_MARKER_COLOR_UNSELECTED in colors
+
+
+def test_semester_grid_figure_only_selected_tiles_get_a_short_code_label():
+    # Regression test: an unselected (grey) tile used to still show its
+    # short code in white text on top, reported as illegible clutter.
+    selected = make_module(modulname="Kurs A", modul_nr="A1", datum=date(2026, 9, 14))
+    unselected = make_module(modulname="Kurs B", modul_nr="B1", datum=date(2026, 9, 21))
+    fig, _, _ = app._semester_grid_figure([selected, unselected], [selected])
+    # Note: `trace.text or ()` is NOT safe here - Plotly stores `text` as a
+    # numpy array, and a single-element array's truthiness is that of its
+    # one element, so an array holding just [""] evaluates as falsy and
+    # would be silently skipped by an `or` fallback.
+    all_texts = [text for trace in fig.data for text in (trace.text if trace.text is not None else ())]
+    assert "A1" in all_texts
+    assert "B1" not in all_texts
+    assert "" in all_texts
+
+
 # --- _hidden_selected_count (Schritt-2 filter quick wins) -----------------
 
 @pytest.fixture(autouse=True)
