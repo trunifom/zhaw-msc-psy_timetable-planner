@@ -814,3 +814,129 @@ def test_is_exam_row_true_from_structured_flag_with_non_exam_sounding_title():
 def test_is_exam_row_false_when_neither_signal_is_set():
     module = make_module(modulname="Statistik II", ist_pruefung=False)
     assert app._is_exam_row(module) is False
+
+
+# --- _assign_weekday_lanes: greedy overlap-packing for the Wochenplan "lanes"
+# layout (previously untested despite being a pure, Streamlit-independent
+# helper in the same profile as the other pure helpers in this file) -------
+
+def test_assign_weekday_lanes_non_overlapping_slots_all_get_lane_zero():
+    slots = [
+        {"start": "08:00:00", "end": "09:00:00"},
+        {"start": "09:00:00", "end": "10:00:00"},  # starts exactly when the first ends - not an overlap
+        {"start": "10:30:00", "end": "11:00:00"},
+    ]
+    lane_count = app._assign_weekday_lanes(slots)
+    assert lane_count == 1
+    assert [s["lane"] for s in slots] == [0, 0, 0]
+
+
+def test_assign_weekday_lanes_two_overlapping_slots_get_separate_lanes():
+    slots = [
+        {"start": "08:00:00", "end": "10:00:00"},
+        {"start": "09:00:00", "end": "11:00:00"},  # overlaps the first
+    ]
+    lane_count = app._assign_weekday_lanes(slots)
+    assert lane_count == 2
+    assert {s["lane"] for s in slots} == {0, 1}
+
+
+def test_assign_weekday_lanes_reuses_a_freed_lane_instead_of_opening_a_third():
+    # Three slots where the first two overlap (need 2 lanes), but the third
+    # starts only after the first has already ended - it should reuse lane
+    # 0 rather than needlessly opening a third lane.
+    slots = [
+        {"start": "08:00:00", "end": "09:00:00"},
+        {"start": "08:30:00", "end": "10:00:00"},
+        {"start": "09:30:00", "end": "10:30:00"},
+    ]
+    lane_count = app._assign_weekday_lanes(slots)
+    assert lane_count == 2
+
+
+def test_assign_weekday_lanes_triple_overlap_needs_three_lanes():
+    slots = [
+        {"start": "08:00:00", "end": "11:00:00"},
+        {"start": "08:30:00", "end": "10:30:00"},
+        {"start": "09:00:00", "end": "10:00:00"},
+    ]
+    lane_count = app._assign_weekday_lanes(slots)
+    assert lane_count == 3
+    assert {s["lane"] for s in slots} == {0, 1, 2}
+
+
+def test_assign_weekday_lanes_empty_input_returns_one_not_zero():
+    # Documented minimum: "at least 1" even for an empty day, so a caller
+    # can always use the return value directly as a row-height multiplier
+    # without a special-case for "no sessions this day".
+    assert app._assign_weekday_lanes([]) == 1
+
+
+# --- Schritt-2 filter reset/version-key helpers (previously untested) -----
+
+@pytest.fixture(autouse=True)
+def _clear_filter_state():
+    """Reset every filter-related session_state key before AND after each
+    test in this section, same reasoning as _clear_selection_state above -
+    st.session_state is a process-wide dict in bare/test mode."""
+    keys = list(app._MULTI_VALUE_FILTER_KEYS) + [
+        app._TEXT_FILTER_KEY,
+        app._RADIO_FILTER_KEY,
+        app._TEXT_FILTER_VERSION_KEY,
+        app._text_filter_widget_key(),
+    ]
+    for key in keys:
+        app.st.session_state.pop(key, None)
+    yield
+    for key in keys:
+        app.st.session_state.pop(key, None)
+
+
+def test_text_filter_widget_key_includes_the_version_counter():
+    assert app._text_filter_widget_key() == f"{app._TEXT_FILTER_KEY}_0"
+    app.st.session_state[app._TEXT_FILTER_VERSION_KEY] = 3
+    assert app._text_filter_widget_key() == f"{app._TEXT_FILTER_KEY}_3"
+
+
+def test_reset_all_filters_clears_multiselect_and_radio_keys():
+    app.st.session_state["filter_modul_nr"] = ["AS1"]
+    app.st.session_state["filter_weekdays"] = ["Montag"]
+    app.st.session_state[app._RADIO_FILTER_KEY] = "Nur Bachelorkurse (Zusatzmodule)"
+    app._reset_all_filters()
+    assert app.st.session_state.get("filter_modul_nr") is None
+    assert app.st.session_state.get("filter_weekdays") is None
+    assert app.st.session_state.get(app._RADIO_FILTER_KEY) is None
+
+
+def test_reset_all_filters_bumps_text_filter_version_instead_of_just_popping():
+    # Regression test for the "Freitextsuche wird nach Reset nicht wirklich
+    # geloescht" bug (commit c7cc15bb): a plain session_state.pop() on the
+    # search box's key is not reliable (see _text_filter_widget_key()'s
+    # docstring) - resetting must mint a NEW widget key by bumping the
+    # version counter, not just clear the old one's value.
+    old_key = app._text_filter_widget_key()
+    app.st.session_state[old_key] = "Statistik"
+    app._reset_all_filters()
+    new_key = app._text_filter_widget_key()
+    assert new_key != old_key
+    # The old, now-orphaned key must not linger in session_state either.
+    assert old_key not in app.st.session_state
+
+
+def test_active_filter_count_counts_each_active_filter_type_once():
+    assert app._active_filter_count() == 0
+    app.st.session_state["filter_modul_nr"] = ["AS1"]
+    app.st.session_state["filter_weekdays"] = ["Montag"]
+    assert app._active_filter_count() == 2
+    app.st.session_state[app._text_filter_widget_key()] = "Statistik"
+    assert app._active_filter_count() == 3
+    app.st.session_state[app._RADIO_FILTER_KEY] = "Nur Bachelorkurse (Zusatzmodule)"
+    assert app._active_filter_count() == 4
+
+
+def test_active_filter_count_zero_after_reset():
+    app.st.session_state["filter_modul_nr"] = ["AS1"]
+    app.st.session_state[app._text_filter_widget_key()] = "Statistik"
+    assert app._active_filter_count() == 2
+    app._reset_all_filters()
+    assert app._active_filter_count() == 0
