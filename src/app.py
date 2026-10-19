@@ -5680,6 +5680,29 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         st.session_state.selected_row_ids = sorted(selected_ids)
         selected_modules = [m for idx, m in modules_with_id if idx in selected_ids]
 
+    # Known, investigated residual limitation of the native st.dataframe row-
+    # selection used by all three tables above (replaced the old data_editor/
+    # CheckboxColumn approach specifically BECAUSE that one had a confirmed,
+    # unfixable frontend click-registration race - see docs/TESTING-README.md
+    # and README.md's note that the former "please wait a moment" hint
+    # "entfällt" with the new widget). Live-reproduced with Playwright that
+    # the NEW widget has its own, rarer version of essentially the same
+    # problem: clicking a row - especially the single remaining row right
+    # after a Schritt-2 filter was just narrowed - visually ticks the
+    # checkbox, but `st.dataframe`'s `on_select="rerun"` event occasionally
+    # (~1 in 5 clicks in one reproduction run) reports a STALE selection for
+    # that exact rerun; this file's own selection-persistence/reseed logic
+    # (_dataframe_row_selection()'s docstring) then locks that stale result
+    # in as the new "achieved" baseline, and the click is permanently lost,
+    # not just delayed - confirmed by clearing the filter afterward and
+    # finding the clicked module still unselected. This is a genuine
+    # Streamlit-level timing defect (not reproducible as a logic bug in this
+    # file's own merge/reseed code - see the investigation notes in this
+    # commit's message), so - consistent with how the EARLIER CheckboxColumn
+    # race was handled in this project - the mitigation is an explicit,
+    # actionable hint rather than a speculative code "fix" that cannot
+    # actually guarantee correctness against a frontend-side race condition.
+    st.caption(t("guided.selection_click_hint"))
     st.info(t("guided.current_selection", selected=len(selected_modules), filtered=len(filtered)))
     st.session_state.selected_modules = selected_modules
     guided_step2_card.__exit__(None, None, None)

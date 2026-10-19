@@ -112,7 +112,7 @@ streamlit run src/app.py
 5. Im Tab "Konfliktanalyse" Kollisionen auflösen
 6. Export am Ende freischalten und als XLSX/ICS herunterladen
 
-Die drei Auswahltabellen in Schritt 2 (Modulbasiert/Nach Kursname/"Alle Termine darstellen") nutzen eine native, per Einzelklick zuverlässige Zeilenauswahl (`st.dataframe` mit `on_select`/`selection_mode`, seit Streamlit 1.35) statt der früheren Checkbox-Spalte - der frühere Hinweis, nach jedem Klick kurz zu warten, entfällt damit (siehe docs/TESTING-README.md für die Vorgeschichte dieses Wechsels).
+Die drei Auswahltabellen in Schritt 2 (Modulbasiert/Nach Kursname/"Alle Termine darstellen") nutzen eine native Zeilenauswahl (`st.dataframe` mit `on_select`/`selection_mode`, seit Streamlit 1.35) statt der früheren Checkbox-Spalte, deren Klick-Erkennung per Playwright als zuverlässig defekt bestätigt war (siehe docs/TESTING-README.md für die Vorgeschichte dieses Wechsels). Die neue Zeilenauswahl ist deutlich zuverlässiger, aber nicht hundertprozentig frei von demselben Grundproblem: ein Klick direkt nach dem Ändern eines Filters kann in seltenen Fällen (per Playwright reproduziert) für genau diesen einen Rerun eine veraltete Auswahl melden und dadurch verloren gehen - ein Hinweis unter der Tabelle ("Prüfe nach dem Anklicken kurz die Zahl ... Aktuell ausgewählt") macht das sichtbar, statt dass es unbemerkt bleibt.
 
 Zusätzliche Einstellungen in der Sidebar bzw. im Dashboard:
 

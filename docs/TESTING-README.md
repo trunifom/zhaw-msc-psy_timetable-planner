@@ -584,6 +584,62 @@ that "Stop" button to disappear before proceeding is the reliable way to
 wait for a Streamlit rerun to actually finish in a Playwright check, not a
 fixed sleep.
 
+## Residual click-race in the native row-selection tables (2026-10-19)
+
+Investigated a user report: "selected one module, searched/filtered for a
+second one, clicked it, it never appeared in the selection - selecting the
+same module from the full unfiltered table works fine." Reproduced live
+with Playwright against the full 1182-row real-shaped fixture
+(`tests/fixtures/vorlesungsverzeichnis_bsc_vollstaendig_fiktiv.xlsx`):
+select one module unfiltered, narrow the Modul-Nr filter down to exactly
+one different module, click its row. Ran the identical script 5 times:
+
+- 1/5 times: worked correctly, the "Aktuell ausgewählt" count updated
+  immediately to include both modules.
+- 4/5 times: the checkbox visually ticked (confirmed in a screenshot - a
+  blue checkmark genuinely appears), but the "Aktuell ausgewählt" count
+  stayed frozen at the old value. Waiting up to 6 seconds afterward did
+  not self-correct. Confirmed this is NOT just a display lag: clearing the
+  filter afterward and returning to the full table showed the first module
+  still checked and the second one still UNCHECKED - the click was
+  genuinely, permanently lost, not merely slow to render.
+
+Root cause, as best as can be determined without an upstream Streamlit
+fix: `st.dataframe(..., on_select="rerun")`'s `event.selection.rows` is
+occasionally stale (reflecting the state from BEFORE the click) on the
+exact rerun that the click itself triggers - a timing/sync issue on
+Streamlit's own frontend-to-backend event delivery, not something this
+app's Python code controls directly (a Streamlit community forum thread
+about the closely related `st.plotly_chart(..., on_select="rerun")`
+describes the same one-rerun-lag symptom). `_dataframe_row_selection()`'s
+own signature-tracking (see its docstring and the section above) then
+records that stale, unchanged result as the new "achieved" baseline -
+nothing in this file re-checks it later. If the row set then changes for
+an unrelated reason (e.g. the student clears the filter), the reseed path
+recomputes the widget's selection from `desired_keys`, which has already
+locked in the lost click - permanently discarding it rather than merely
+delaying it.
+
+This is the same CLASS of problem as the original `CheckboxColumn` race
+documented in the section above (a genuine frontend/widget-level timing
+defect, confirmed live, not reproducible as a logic bug in this file's own
+merge/reseed code), just far rarer with the native-selection replacement
+than with the old grid component. Consistent with how that one was
+handled: no code "fix" was attempted (there is no reliable way for
+server-side Python to retroactively correct a frontend event it was never
+told the true, current value of), and an explicit, actionable hint
+(`guided.selection_click_hint`, a `st.caption()` right above the "Aktuell
+ausgewählt" count, shared by all three selection modes) was added instead,
+telling the student to verify the count after clicking and to click again
+if it didn't change. If this needs a harder fix in the future, the
+most promising avenue (not yet attempted, a bigger design change needing
+sign-off per this project's "ask before a bigger, ambiguous decision"
+convention) would be wrapping each selection table in an `st.form` so a
+click only commits on an explicit submit action, removing the dependency
+on `on_select="rerun"`'s immediate-event-delivery guarantee entirely -
+or filing an upstream Streamlit GitHub issue with a minimal repro, per a
+Streamlit forum moderator's suggestion for this exact symptom class.
+
 ## UI polish round: dark-mode contrast + relocating item removal
 
 A 2026-10-12 round addressed four user-reported graphical issues, found
