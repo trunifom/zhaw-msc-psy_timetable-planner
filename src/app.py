@@ -685,9 +685,21 @@ def init_session_state() -> None:
         drives the dashboard/timetable/conflicts/export views.
       - filters_initialized: reserved flag for one-time filter-widget setup
         (kept for forward compatibility with guided-planning filter state).
-      - selected_course_bases: list of module/course group keys the student
-        checked in the guided-planning selection tables, persisted so the
-        checkboxes stay selected across reruns (see render_guided_planning).
+      - selected_module_keys: list of "module" selection-mode group keys
+        (see _module_group_key - Modul-Nr, or "BASIS::<base>" as a
+        fallback) the student checked in guided planning's "module" mode
+        table, persisted so the checkboxes stay selected across reruns.
+      - selected_course_bases: list of "course" selection-mode base-course
+        titles (see _split_course_variant - the RAW, non-lowercased base
+        title, a different key format from selected_module_keys above) the
+        student checked in guided planning's "course" mode table. Kept as a
+        SEPARATE key from selected_module_keys rather than one shared key
+        for both modes - a real, reported bug fixed by this split: the two
+        modes' keys are drawn from incompatible formats (Modul-Nr/"BASIS::
+        ..." vs. raw base titles), so a module checked in "module" mode
+        used to become silently invisible (not literally lost, just
+        unmatched) the moment the student switched to "course" mode, and
+        vice versa.
       - ui_language: current UI language code ("de"/"en"/"fr"), read by
         t()/c() below to resolve translations.
       - ui_theme: current UI color theme ("dark"/"light"), read by
@@ -740,6 +752,8 @@ def init_session_state() -> None:
         st.session_state.selected_modules = []
     if 'filters_initialized' not in st.session_state:
         st.session_state.filters_initialized = False
+    if 'selected_module_keys' not in st.session_state:
+        st.session_state.selected_module_keys = []
     if 'selected_course_bases' not in st.session_state:
         st.session_state.selected_course_bases = []
     if 'selected_row_ids' not in st.session_state:
@@ -1008,10 +1022,10 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
     Side effects (all on success): populates the raw_data/processed_modules
     slot matching `ist_zusatzmodul`, recomputes the combined
     processed_modules + conflicts (see _recompute_combined_modules()),
-    resets selected_modules/selected_course_bases (a new upload invalidates
-    any prior selection made against the old combined dataset), and shows a
-    success toast. On failure it renders an st.error()/st.info() and leaves
-    session state untouched.
+    resets selected_modules/selected_module_keys/selected_course_bases (a
+    new upload invalidates any prior selection made against the old
+    combined dataset), and shows a success toast. On failure it renders an
+    st.error()/st.info() and leaves session state untouched.
 
     CSV vs. Excel handling differs deliberately:
       - CSV: there is exactly one "sheet" and pandas' default header=0
@@ -1043,6 +1057,7 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
             st.session_state[modules_key] = load_schedule_from_dataframe(df, ist_zusatzmodul=ist_zusatzmodul)
             _recompute_combined_modules()
             st.session_state.selected_modules = []
+            st.session_state.selected_module_keys = []
             st.session_state.selected_course_bases = []
             st.session_state.selected_row_ids = []
             # A brand-new upload invalidates any earlier "yes, I'm finished
@@ -1086,6 +1101,7 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
                 st.session_state[modules_key] = processed_modules
                 _recompute_combined_modules()
                 st.session_state.selected_modules = []
+                st.session_state.selected_module_keys = []
                 st.session_state.selected_course_bases = []
                 st.session_state.selected_row_ids = []
                 # See the comment at the CSV branch above for why this reset
@@ -4059,7 +4075,8 @@ def _dataframe_row_selection(
     Why only "sometimes" reseed, not every rerun: `st.dataframe`'s row
     selection is tracked by POSITION in the `df` passed to THIS call, not
     by any stable per-row identity, AND is entirely opaque to whatever the
-    caller's own "semantic truth" (e.g. `selected_course_bases`) says - it
+    caller's own "semantic truth" (e.g. `selected_module_keys`/`selected_
+    course_bases`) says - it
     does not auto-reconcile against that the way `st.data_editor` used to
     appear to (that widget actually diffs its displayed VALUES against
     user edits, which is why the old `c("select")`-column approach picked
@@ -4073,8 +4090,9 @@ def _dataframe_row_selection(
       2. `desired_keys` itself changed for a reason that has nothing to do
          with this exact table - e.g. the "✕" button in
          _render_selected_items_removal() or a filter chip's "✕" changed
-         `selected_course_bases`/`selected_row_ids` directly and forced a
-         fresh rerun; from this function's point of view the row set may
+         `selected_module_keys`/`selected_course_bases`/`selected_row_ids`
+         directly and forced a fresh rerun; from this function's point of
+         view the row set may
          be identical, but what OUGHT to be selected has changed under it.
     A companion session_state key records `(row_keys_in_order, desired_
     keys)` as it stood the last time `df_key` was rendered; if EITHER part
@@ -4093,8 +4111,9 @@ def _dataframe_row_selection(
     development: the signature's second half is recorded from what this
     call actually ACHIEVES (`checked_now`, returned to the caller), NOT
     from the `desired_keys` it was given going in. `desired_keys` is
-    computed by the caller from `selected_course_bases`/`selected_row_ids`
-    BEFORE this call - and the caller only writes the updated value back
+    computed by the caller from `selected_module_keys`/`selected_course_
+    bases`/`selected_row_ids` (whichever key the current selection mode
+    uses) BEFORE this call - and the caller only writes the updated value back
     AFTER this call returns - so on every subsequent render, `desired_keys`
     reflects the PREVIOUS click's result, one step behind what was just
     recorded as the signature if the signature were taken from
@@ -4177,10 +4196,12 @@ def _render_selected_items_removal(all_modules: List[Any], selection_mode: str) 
       student's next unrelated interaction.
 
     Operates on `all_modules` (not the currently filtered subset) and reads
-    the same persisted selection keys ("selected_course_bases" for
-    module/course mode, "selected_row_ids" for row mode) the mode-specific
-    code below reads - so this list, and what it removes, stays correct
-    regardless of whatever filter is currently narrowing the table.
+    the same persisted selection keys ("selected_course_bases" for course
+    mode, "selected_row_ids" for row mode - "module" mode uses its own
+    separate "selected_module_keys" key, but never reaches this function at
+    all, see below) the mode-specific code below reads - so this list, and
+    what it removes, stays correct regardless of whatever filter is
+    currently narrowing the table.
 
     Skips "module" mode entirely (see the `if selection_mode ==
     t("guided.mode.module"): return` below) - reported as confusing on its
@@ -4507,11 +4528,13 @@ def _hidden_selected_count(all_modules: List[Any], filtered: List[Any], selectio
     docstring for why that's safe/up to date) is required, not just
     convenient.
     """
-    if selection_mode in (t("guided.mode.module"), t("guided.mode.course")):
-        if selection_mode == t("guided.mode.module"):
-            visible_keys = {_module_group_key(m) for m in filtered}
-        else:
-            visible_keys = {_split_course_variant(m.modulname)[0] for m in filtered}
+    if selection_mode == t("guided.mode.module"):
+        visible_keys = {_module_group_key(m) for m in filtered}
+        selected_keys = set(st.session_state.get("selected_module_keys", []))
+        return len(selected_keys - visible_keys)
+
+    if selection_mode == t("guided.mode.course"):
+        visible_keys = {_split_course_variant(m.modulname)[0] for m in filtered}
         selected_keys = set(st.session_state.get("selected_course_bases", []))
         return len(selected_keys - visible_keys)
 
@@ -5125,7 +5148,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         module_desired_keys = (
             set(module_forced_selection)
             if module_forced_selection is not None
-            else set(st.session_state.get("selected_course_bases", []))
+            else set(st.session_state.get("selected_module_keys", []))
         )
         checked_now = _dataframe_row_selection(
             module_df,
@@ -5141,9 +5164,9 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         # before - only the keys actually shown just now are authoritative
         # from `checked_now`. See the comment at `grouped_modules_all`
         # above for why this matters.
-        selected_keys_prev_all = set(st.session_state.get("selected_course_bases", []))
+        selected_keys_prev_all = set(st.session_state.get("selected_module_keys", []))
         selected_keys = (selected_keys_prev_all - set(grouped_modules.keys())) | checked_now
-        st.session_state.selected_course_bases = sorted(selected_keys)
+        st.session_state.selected_module_keys = sorted(selected_keys)
 
         selected_modules = []
         selected_by_module_key: dict[str, list[Any]] = {}
@@ -5218,8 +5241,8 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                     key=f"remove_module_{key}",
                     help=t("guided.remove_selection_help"),
                 ):
-                    remaining = set(st.session_state.get("selected_course_bases", [])) - {key}
-                    st.session_state.selected_course_bases = sorted(remaining)
+                    remaining = set(st.session_state.get("selected_module_keys", [])) - {key}
+                    st.session_state.selected_module_keys = sorted(remaining)
                     guided_step2_card.__exit__(None, None, None)
                     st.rerun()
 
@@ -5626,8 +5649,8 @@ def render_sidebar() -> None:
     Side effects on st.session_state: ui_theme (from the appearance
     toggle), and - indirectly, via handle_file_upload()/the "file removed"
     branches below - raw_data(_zusatz), processed_modules_main/_zusatz,
-    the derived processed_modules, conflicts, selected_modules and
-    selected_course_bases.
+    the derived processed_modules, conflicts, selected_modules,
+    selected_module_keys and selected_course_bases.
     """
     with st.sidebar:
         st.header(t("sidebar.header"))
@@ -5718,6 +5741,7 @@ def render_sidebar() -> None:
                 st.session_state.processed_modules = []
                 st.session_state.conflicts = []
                 st.session_state.selected_modules = []
+                st.session_state.selected_module_keys = []
                 st.session_state.selected_course_bases = []
                 st.session_state.selected_row_ids = []
                 # A removed file means there is nothing left to have
@@ -5765,6 +5789,7 @@ def render_sidebar() -> None:
                     st.session_state.processed_modules_zusatz = []
                     _recompute_combined_modules()
                     st.session_state.selected_modules = []
+                    st.session_state.selected_module_keys = []
                     st.session_state.selected_course_bases = []
                     st.session_state.selected_row_ids = []
                     # See the comment at the main-file-removed branch above

@@ -297,21 +297,23 @@ def test_semester_grid_figure_marks_real_time_conflict_with_black_outline():
 
 @pytest.fixture(autouse=True)
 def _clear_selection_state():
-    """Every _hidden_selected_count test below sets selected_course_bases/
-    selected_row_ids directly - reset both before AND after each test so
-    one test's fixture state can never leak into the next (st.session_state
-    is just a process-wide dict in bare/test mode, not request-scoped)."""
-    for key in ("selected_course_bases", "selected_row_ids"):
+    """Every _hidden_selected_count test below sets selected_module_keys/
+    selected_course_bases/selected_row_ids directly - reset all three before
+    AND after each test so one test's fixture state can never leak into the
+    next (st.session_state is just a process-wide dict in bare/test mode,
+    not request-scoped)."""
+    keys = ("selected_module_keys", "selected_course_bases", "selected_row_ids")
+    for key in keys:
         app.st.session_state.pop(key, None)
     yield
-    for key in ("selected_course_bases", "selected_row_ids"):
+    for key in keys:
         app.st.session_state.pop(key, None)
 
 
 def test_hidden_selected_count_module_mode_counts_keys_outside_filtered():
     visible = make_module(modulname="Sichtbar", modul_nr="VIS1")
     hidden = make_module(modulname="Versteckt", modul_nr="HID1")
-    app.st.session_state["selected_course_bases"] = ["VIS1", "HID1"]
+    app.st.session_state["selected_module_keys"] = ["VIS1", "HID1"]
     # `filtered` only contains the visible module - HID1's key is selected
     # but not part of the currently filtered/visible set.
     count = app._hidden_selected_count([visible, hidden], [visible], app.t("guided.mode.module"))
@@ -320,9 +322,27 @@ def test_hidden_selected_count_module_mode_counts_keys_outside_filtered():
 
 def test_hidden_selected_count_is_zero_when_everything_selected_is_visible():
     visible = make_module(modulname="Sichtbar", modul_nr="VIS1")
-    app.st.session_state["selected_course_bases"] = ["VIS1"]
+    app.st.session_state["selected_module_keys"] = ["VIS1"]
     count = app._hidden_selected_count([visible], [visible], app.t("guided.mode.module"))
     assert count == 0
+
+
+def test_hidden_selected_count_module_and_course_mode_use_independent_keys():
+    # Regression test for the shared-session-state-key bug: "module" mode
+    # and "course" mode used to both read/write the SAME "selected_course_
+    # bases" key despite drawing their keys from incompatible formats
+    # (Modul-Nr/"BASIS::..." vs. raw base-course titles) - a module checked
+    # in one mode became silently invisible (not actually lost, just
+    # unmatched against the other mode's key format) the moment the student
+    # switched the selection_mode radio. Setting ONLY selected_module_keys
+    # (not selected_course_bases) must be reflected in "module" mode's count
+    # and must NOT leak into "course" mode's count, and vice versa.
+    visible = make_module(modulname="Sichtbar", modul_nr="VIS1")
+    hidden = make_module(modulname="Versteckt", modul_nr="HID1")
+    app.st.session_state["selected_module_keys"] = ["HID1"]
+    app.st.session_state["selected_course_bases"] = []
+    assert app._hidden_selected_count([visible, hidden], [visible], app.t("guided.mode.module")) == 1
+    assert app._hidden_selected_count([visible, hidden], [visible], app.t("guided.mode.course")) == 0
 
 
 def test_hidden_selected_count_row_mode_uses_positions_not_identity():
