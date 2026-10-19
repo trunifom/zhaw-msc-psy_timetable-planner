@@ -655,4 +655,64 @@ def test_resolve_default_theme_auto_falls_back_to_light_without_signal(monkeypat
     # app's original fixed default.
     monkeypatch.setattr(app.settings, "DEFAULT_THEME", "auto")
     assert app._resolve_default_theme(None) == "light"
+
+
+# --- _split_course_variant: title-suffix parsing (group/run/exam detection) -
+
+def test_split_course_variant_recognizes_halbklasse_suffix():
+    # Real-data bug fix: "Halbklasse <n>" (half-class split) used to fall
+    # through unrecognized, normalizing to the empty/"STANDARD" variant for
+    # every half-class - indistinguishable from each other. Confirmed
+    # against the real ZHAW Bachelor catalog (module "IN1", see the fix's
+    # commit message) that two half-class rows share the same Kurs-Nr and
+    # are told apart only by this title suffix (and by lecturer).
+    base, variant, is_exam = app._split_course_variant(
+        "Grundlagen der Intervention - Halbklasse 1"
+    )
+    assert base == "Grundlagen der Intervention"
+    assert variant == "HALBKLASSE 1"
+    assert is_exam is False
+
+
+def test_split_course_variant_halbklasse_1_and_2_share_base_but_differ_in_variant():
+    # The two half-classes of the same course must normalize to the SAME
+    # base title (so they group into one "family"/component) but to TWO
+    # DIFFERENT variant labels (so guided planning's "module" mode treats
+    # them as a mutually-exclusive either/or choice, not as one mandatory
+    # component that silently includes both).
+    base_1, variant_1, _ = app._split_course_variant("Kurs X - Halbklasse 1")
+    base_2, variant_2, _ = app._split_course_variant("Kurs X - Halbklasse 2")
+    assert base_1 == base_2 == "Kurs X"
+    assert variant_1 != variant_2
+
+
+def test_split_course_variant_ganzklasse_suffix_unaffected_by_halbklasse_fix():
+    base, variant, is_exam = app._split_course_variant("Kurs Y/Ganzklasse")
+    assert base == "Kurs Y"
+    assert variant == "GANZKLASSE"
+    assert is_exam is False
+
+
+def test_split_course_variant_plain_title_has_no_variant():
+    base, variant, is_exam = app._split_course_variant("Statistik II")
+    assert base == "Statistik II"
+    assert variant == ""
+    assert is_exam is False
+
+
+def test_split_course_variant_exam_suffix_sets_is_exam_and_variant_marker():
+    base, variant, is_exam = app._split_course_variant("Statistik II/Prüfung")
+    assert base == "Statistik II"
+    assert variant == "PRUEFUNG"
+    assert is_exam is True
+
+
+def test_split_course_variant_stacked_group_and_exam_suffixes():
+    # A title can carry more than one suffix at once; exam detection must
+    # run first (see the function's own docstring) so it doesn't get stuck
+    # attached to the group suffix.
+    base, variant, is_exam = app._split_course_variant("Statistik II/Gruppe A/Prüfung")
+    assert base == "Statistik II"
+    assert variant == "GRUPPE A | PRUEFUNG"
+    assert is_exam is True
     assert app._resolve_default_theme("something_unexpected") == "light"

@@ -1855,10 +1855,12 @@ def _split_course_variant(course_name: str) -> tuple[str, str, bool]:
          own dedicated pass).
       2. Variant suffix loop: repeatedly strips one recognized suffix at a
          time from the end of the (already exam-stripped) name - covering
-         "Ganzklasse" (whole-class), "Gruppe <label>" (a lettered/numbered
-         group, e.g. "Gruppe A" or "Gruppe A+B"), "TK<n> Gruppe <letter>[ &
-         Gruppe <letter>]" (teaching-group combinations), and
-         "Durchführung <n>" (a numbered repeated run of the same course).
+         "Ganzklasse" (whole-class), "Halbklasse <n>" (a numbered half-class
+         split, e.g. "Halbklasse 1"/"Halbklasse 2" - see below), "Gruppe
+         <label>" (a lettered/numbered group, e.g. "Gruppe A" or "Gruppe
+         A+B"), "TK<n> Gruppe <letter>[ & Gruppe <letter>]" (teaching-group
+         combinations), and "Durchführung <n>" (a numbered repeated run of
+         the same course).
          It loops (not just a single re.sub) because some titles stack more
          than one suffix, e.g. "Kurs/TK1 Gruppe A/Durchführung 2" - each
          iteration peels off the outermost (rightmost) suffix and
@@ -1877,6 +1879,25 @@ def _split_course_variant(course_name: str) -> tuple[str, str, bool]:
     with no variant suffix. is_exam additionally influences ist_pruefung
     detection alongside the explicit flag/model-level inference in
     models.py (ZHAWModule.validate_time_logic).
+
+    Real-data bug fixed here: "Halbklasse <n>" (half-class split, e.g. a
+    module taught twice in parallel to two half-sized groups) was NOT
+    recognized as a variant suffix until this fix - verified against the
+    real ZHAW Bachelor catalog (`data/real/`, gitignored), where e.g.
+    module "IN1" has two rows "Grundlagen der Intervention - Halbklasse 1"
+    and "... - Halbklasse 2" sharing the SAME Kurs-Nr (distinguished only
+    by this title suffix and by lecturer). Before this fix, both halves
+    normalized to the identical variant label "STANDARD" (nothing to
+    strip), so guided planning's "module" mode treated them as a single
+    "only one way to do this" mandatory component and silently included
+    BOTH half-classes' sessions in the student's selection at once -
+    exactly the kind of case _has_undistinguished_parallel_offerings()
+    already flags with a caption, but the underlying selection still
+    needed the student to pick just one. Recognizing "Halbklasse <n>" here
+    makes the two rows resolve to two distinct variant labels instead,
+    which already triggers the existing 2+-variants "mutually exclusive,
+    pick one" selectbox path below - the same mechanism "Gruppe A"/"Gruppe
+    B" already used - rather than needing any new UI.
     """
     raw = str(course_name or "").strip()
     if not raw:
@@ -1886,7 +1907,11 @@ def _split_course_variant(course_name: str) -> tuple[str, str, bool]:
     variant_parts: list[str] = []
     is_exam = False
 
-    exam_pattern = r"\s*[/\-]\s*pr(?:u|ue|uef|uf|uef|ü)fung\s*$"
+    # Exam-suffix spelling variants: slash/no-slash umlaut-vs-ASCII renders of
+    # "Prüfung" ("pruefung"/"prufung"/"pruefung"); listed once each (an
+    # earlier version listed "uef" twice, a harmless but confusing copy-paste
+    # duplicate - removed here).
+    exam_pattern = r"\s*[/\-]\s*pr(?:u|ue|uef|uf|ü)fung\s*$"
     if re.search(exam_pattern, name, flags=re.IGNORECASE):
         is_exam = True
         variant_parts.append("PRUEFUNG")
@@ -1895,6 +1920,7 @@ def _split_course_variant(course_name: str) -> tuple[str, str, bool]:
     variant_pattern = (
         r"\s*[/\-]\s*("
         r"ganzklasse|"
+        r"halbklasse\s+\d+|"
         r"gruppe\s+[a-z0-9][a-z0-9\s&+\-]*|"
         r"tk\d+\s+gruppe\s+[a-z](?:\s*&\s*gruppe\s*[a-z])?|"
         r"durchf(?:u|ue|ü)hrung\s*\d+"

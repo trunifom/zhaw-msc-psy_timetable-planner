@@ -164,6 +164,7 @@ def _assign_deterministically(real_values: list[str], pool: list[str]) -> dict[s
 _SUFFIX_PATTERN = re.compile(
     r"\s*[/\-]\s*("
     r"ganzklasse|"
+    r"halbklasse\s+\d+|"
     r"gruppe\s+[a-z0-9][a-z0-9\s&+\-]*|"
     r"tk\d+\s+gruppe\s+[a-z](?:\s*&\s*gruppe\s*[a-z])?|"
     r"durchf(?:u|ue|ü)hrung\s*\d+|"
