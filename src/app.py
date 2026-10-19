@@ -3047,9 +3047,19 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
     Returns (figure_or_None, excluded_undated_count, excluded_pruefungseinsicht_count).
     """
     selected_ids = {id(m) for m in selected_modules}
-    conflicted_ids = {
-        id(m) for pair in find_time_conflicts(selected_modules) for m in pair
-    }
+    conflict_pairs = find_time_conflicts(selected_modules)
+    conflicted_ids = {id(m) for pair in conflict_pairs for m in pair}
+    # Which OTHER selected course(s) does each conflicted module collide
+    # with, by name - shown in the tile's hover text (see "_conflict_
+    # partners" below) so a student doesn't have to already know which two
+    # of their N selected courses are the ones sharing this exact tile. The
+    # black outline alone (see _mark_conflicted_sessions below) signals
+    # "something collides here" but not WITH WHAT - a real gap reported
+    # after a live walkthrough of this chart.
+    conflict_partner_names: dict[int, list[str]] = {}
+    for left, right in conflict_pairs:
+        conflict_partner_names.setdefault(id(left), []).append(_module_label(right))
+        conflict_partner_names.setdefault(id(right), []).append(_module_label(left))
     weekday_order = _weekday_labels_in_order()
 
     rows = []
@@ -3094,6 +3104,7 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
                 "_is_exam": bool(getattr(module, "ist_pruefung", False)),
                 "_is_conflict": id(module) in conflicted_ids,
                 "_is_selected": is_selected,
+                c("conflict_partners"): ", ".join(conflict_partner_names.get(id(module), [])),
             }
         )
 
@@ -3121,7 +3132,18 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         color_discrete_map={unselected_label: "#b5bac6"},
         text="_short_code",
         hover_name=c("module"),
-        hover_data={c("date"): True, c("time"): True, c("room"): True, "_color_key": False, "_short_code": False},
+        hover_data={
+            c("date"): True,
+            c("time"): True,
+            c("room"): True,
+            "_color_key": False,
+            "_short_code": False,
+            # Blank (not hidden) for a non-conflicting tile - showing the
+            # label with an empty value is a minor cosmetic rough edge,
+            # accepted deliberately over the complexity of a fully custom
+            # per-point hovertemplate just to suppress it conditionally.
+            c("conflict_partners"): True,
+        },
         custom_data=["_is_exam", "_is_conflict", "_is_selected"],
         category_orders={c("weekday"): present_weekdays, c("week"): ordered_weeks},
     )

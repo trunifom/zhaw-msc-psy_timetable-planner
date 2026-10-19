@@ -293,6 +293,29 @@ def test_semester_grid_figure_marks_real_time_conflict_with_black_outline():
         assert trace.marker.line.color == (app._CONFLICT_MARKER_COLOR,)
 
 
+def test_semester_grid_figure_hover_names_the_specific_conflict_partner():
+    # Regression/clarity fix: two overlapping selected courses used to
+    # overplot each other with only a black outline as a generic "something
+    # collides here" signal, with no way to tell WHICH other course it was
+    # without already knowing the full selection - reported after a live
+    # walkthrough. Each conflicting tile's hover now names its actual
+    # partner(s) by module label.
+    a = make_module(modulname="Kurs A", modul_nr="A1", datum=date(2026, 9, 14), startzeit=time(9, 0), endzeit=time(11, 0))
+    b = make_module(modulname="Kurs B", modul_nr="B1", datum=date(2026, 9, 14), startzeit=time(10, 0), endzeit=time(12, 0))
+    fig, _, _ = app._semester_grid_figure([a, b], [a, b])
+    hover_by_name = {trace.name: trace for trace in fig.data}
+    assert app._module_label(b) in hover_by_name[app._module_label(a)].customdata[0]
+    assert app._module_label(a) in hover_by_name[app._module_label(b)].customdata[0]
+
+
+def test_semester_grid_figure_non_conflicting_tile_has_no_conflict_partner():
+    a = make_module(modulname="Kurs A", modul_nr="A1", datum=date(2026, 9, 14), startzeit=time(9, 0), endzeit=time(10, 0))
+    c = make_module(modulname="Kurs C", modul_nr="C1", datum=date(2026, 9, 21), startzeit=time(9, 0), endzeit=time(10, 0))
+    fig, _, _ = app._semester_grid_figure([a, c], [a, c])
+    for trace in fig.data:
+        assert "" in trace.customdata[0]
+
+
 def test_mark_exam_sessions_with_selected_index_mutes_unselected_exams():
     # Regression test: _semester_grid_figure() plots every offered session,
     # selected or not, on one grid - before `selected_index` existed, EVERY
