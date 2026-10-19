@@ -1952,6 +1952,32 @@ def _split_course_variant(course_name: str) -> tuple[str, str, bool]:
     return (base, variant, is_exam)
 
 
+def _is_exam_row(module: Any) -> bool:
+    """
+    Single, shared "is this row an exam, for the purposes of the 'Prüfungs-
+    termine in die Auswahl einschliessen' checkbox" check - a row counts as
+    an exam if EITHER the structured `ist_pruefung` field says so OR its
+    title carries a "/Prüfung"-style suffix per _split_course_variant().
+
+    Both signals exist and can legitimately disagree: `ist_pruefung` is set
+    from an explicit source column (or inferred in models.py from other
+    structured fields), while the title suffix is reverse-engineered from
+    free text - a row could have one without the other depending on how
+    consistently a given ZHAW export fills in each.
+
+    Before this helper existed, each of guided planning's three selection
+    modes checked a DIFFERENT one of these two signals on its own ("module"
+    mode: only `ist_pruefung`; "row" mode: only the title-suffix flag;
+    "course" mode: already correctly checked both) - a real, reported-
+    adjacent bug: unticking "Prüfungstermine einschliessen" could leave
+    exam rows in the selection (or exclude rows that aren't actually exams)
+    depending purely on which of the three mode tabs was used to select
+    them. All three modes now call this one function instead of
+    re-deriving their own partial check.
+    """
+    return bool(getattr(module, "ist_pruefung", False)) or _split_course_variant(module.modulname)[2]
+
+
 def _module_group_key(module: Any) -> str:
     """
     Return a stable key identifying which "module" (the top-level grouping
@@ -5115,8 +5141,8 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 continue
 
             label = _module_group_display(key, items)
-            non_exam_items = [m for m in items if not getattr(m, "ist_pruefung", False)]
-            exam_items = [m for m in items if getattr(m, "ist_pruefung", False)]
+            non_exam_items = [m for m in items if not _is_exam_row(m)]
+            exam_items = [m for m in items if _is_exam_row(m)]
 
             families: dict[str, list[Any]] = {}
             for module in non_exam_items:
@@ -5336,14 +5362,14 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         # it - see the comment at "module" mode's `grouped_modules_all`.
         grouped: dict[str, list[tuple[int, Any, str, bool]]] = {}
         for module_id, module in filtered_with_ids:
-            base, variant, name_exam_flag = _split_course_variant(module.modulname)
-            is_exam = bool(getattr(module, "ist_pruefung", False) or name_exam_flag)
+            base, variant, _ = _split_course_variant(module.modulname)
+            is_exam = _is_exam_row(module)
             grouped.setdefault(base, []).append((module_id, module, variant, is_exam))
 
         grouped_all: dict[str, list[tuple[int, Any, str, bool]]] = {}
         for module_id, module in modules_with_id:
-            base, variant, name_exam_flag = _split_course_variant(module.modulname)
-            is_exam = bool(getattr(module, "ist_pruefung", False) or name_exam_flag)
+            base, variant, _ = _split_course_variant(module.modulname)
+            is_exam = _is_exam_row(module)
             grouped_all.setdefault(base, []).append((module_id, module, variant, is_exam))
 
         course_version, course_forced_selection = _select_all_controls("course_selector", sorted(grouped.keys()))
@@ -5422,7 +5448,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         included_ids = [
             module_id
             for module_id, module in filtered_with_ids
-            if include_exams or not _split_course_variant(module.modulname)[2]
+            if include_exams or not _is_exam_row(module)
         ]
         row_version, row_forced_selection = _select_all_controls("row_selector", included_ids)
 
@@ -5436,8 +5462,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
         row_ids_in_order: list[int] = []
         excluded_exam_rows = 0
         for module_id, module in filtered_with_ids:
-            _, _, is_exam = _split_course_variant(module.modulname)
-            if (not include_exams) and is_exam:
+            if (not include_exams) and _is_exam_row(module):
                 excluded_exam_rows += 1
                 continue
             rows.append(_module_to_row(module, module_id))

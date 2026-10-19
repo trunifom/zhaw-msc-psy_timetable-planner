@@ -655,6 +655,7 @@ def test_resolve_default_theme_auto_falls_back_to_light_without_signal(monkeypat
     # app's original fixed default.
     monkeypatch.setattr(app.settings, "DEFAULT_THEME", "auto")
     assert app._resolve_default_theme(None) == "light"
+    assert app._resolve_default_theme("something_unexpected") == "light"
 
 
 # --- _split_course_variant: title-suffix parsing (group/run/exam detection) -
@@ -715,4 +716,35 @@ def test_split_course_variant_stacked_group_and_exam_suffixes():
     assert base == "Statistik II"
     assert variant == "GRUPPE A | PRUEFUNG"
     assert is_exam is True
-    assert app._resolve_default_theme("something_unexpected") == "light"
+
+
+# --- _is_exam_row: shared exam detection for all three selection modes ----
+
+def test_is_exam_row_true_from_title_suffix_only():
+    # Note: models.py's own "belt-and-braces" exam inference (ZHAWModule.
+    # validate_time_logic) already force-sets ist_pruefung=True whenever the
+    # title contains "pruefung"/"prüfung" as a substring, so a real,
+    # fully-validated module with this title will have BOTH signals true in
+    # practice. This test exercises _is_exam_row() in isolation regardless,
+    # since it must not rely on that model-level backfill to get the right
+    # answer from the title-suffix signal alone.
+    module = make_module(modulname="Statistik II/Prüfung")
+    assert app._is_exam_row(module) is True
+
+
+def test_is_exam_row_true_from_structured_flag_with_non_exam_sounding_title():
+    # The actually load-bearing case this helper fixes: a row flagged as an
+    # exam via a structured source column/field (ist_pruefung=True) whose
+    # title does NOT mention "Prüfung" at all. Before _is_exam_row()
+    # existed, guided planning's "row" selection mode checked ONLY the
+    # title-suffix signal (via _split_course_variant), so a row like this
+    # would have slipped past the "Prüfungstermine einschliessen" checkbox
+    # in "row" mode while being correctly excluded in "module"/"course"
+    # mode - depending purely on which tab was used to select it.
+    module = make_module(modulname="Statistik II", ist_pruefung=True)
+    assert app._is_exam_row(module) is True
+
+
+def test_is_exam_row_false_when_neither_signal_is_set():
+    module = make_module(modulname="Statistik II", ist_pruefung=False)
+    assert app._is_exam_row(module) is False
