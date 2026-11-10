@@ -1066,3 +1066,18 @@ def test_apply_chart_theme_does_not_create_a_title_for_untitled_figures():
     fig = app._apply_chart_theme(px.scatter(x=[1, 2], y=[1, 2]))
     assert fig.layout.title.font.color is None
     assert not fig.layout.title.text
+
+
+def test_split_course_variant_recognizes_space_separated_group_suffix():
+    # Real ZHAW export: "... Digitalisierung Gruppe A" (no slash/hyphen).
+    assert app._split_course_variant("Vertiefung von Aspekten der Digitalisierung Gruppe A") == (
+        "Vertiefung von Aspekten der Digitalisierung",
+        "GRUPPE A",
+        False,
+    )
+    assert app._split_course_variant("Grundlagen Halbklasse 2")[1] == "HALBKLASSE 2"
+
+
+def test_split_course_variant_keeps_titles_that_merely_contain_the_word_gruppe():
+    for title in ("Gruppe der Primaten", "Arbeiten in Gruppen", "Psychologie der Gruppe"):
+        assert app._split_course_variant(title) == (title, "", False)

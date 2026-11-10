@@ -2058,8 +2058,18 @@ def _split_course_variant(course_name: str) -> tuple[str, str, bool]:
         r"durchf(?:u|ue|ü)hrung\s*\d+"
         r")\s*$"
     )
+    # Real-data case (ZHAW MSc "DIG1-2"): "... Digitalisierung Gruppe A" -
+    # the group label follows the title with a plain space, no "/" or "-".
+    # Deliberately narrow (single letter or 1-2 digit number at the very end
+    # of the title) so that ordinary titles that merely contain the word
+    # "Gruppe" (e.g. "Gruppe der Primaten") are never cut apart.
+    space_variant_pattern = r"\s+((?:gruppe|halbklasse)\s+(?:[a-z]|\d{1,2}))\s*$"
     while True:
-        match = re.search(variant_pattern, name, flags=re.IGNORECASE)
+        active_pattern = variant_pattern
+        match = re.search(active_pattern, name, flags=re.IGNORECASE)
+        if not match:
+            active_pattern = space_variant_pattern
+            match = re.search(active_pattern, name, flags=re.IGNORECASE)
         if not match:
             break
         variant_text = match.group(1).strip()
@@ -2067,7 +2077,7 @@ def _split_course_variant(course_name: str) -> tuple[str, str, bool]:
         # loop iteration strips the current rightmost suffix), but should be
         # displayed in their original left-to-right order.
         variant_parts.insert(0, variant_text.upper())
-        name = re.sub(variant_pattern, "", name, count=1, flags=re.IGNORECASE).strip()
+        name = re.sub(active_pattern, "", name, count=1, flags=re.IGNORECASE).strip()
 
     base = name.strip("-/ ") or raw
     variant = " | ".join(variant_parts)
