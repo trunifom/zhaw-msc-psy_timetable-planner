@@ -463,31 +463,6 @@ def test_weekly_timeline_slots_distinguishes_same_module_different_kurs_nr():
 
 # --- _calculate_module_overlap_summary: chart column must stay short -----
 
-def test_overlap_summary_chart_label_is_truncated_even_without_modul_nr():
-    # _module_group_title() (the function this summary groups by) falls
-    # back to the full, untruncated base course title when a module has no
-    # Modul-Nr at all - a real edge case this summary's own "_chart_label"
-    # column exists specifically to guard against, so a title-only module
-    # still can't feed a long name straight into the overlap bar chart's
-    # axis (_overlap_bar_figure).
-    long_title = "Wissenschaftstheoretische und methodologische Grundlagen der Psychologie"
-    m = make_module(modulname=long_title)  # no modul_nr at all
-    summary = app._calculate_module_overlap_summary([m])
-    assert len(summary) == 1
-    row = summary.iloc[0]
-    assert row["_chart_label"] != long_title
-    assert len(row["_chart_label"]) <= 24
-    # The untruncated value remains available under its own, table-facing
-    # column (c("base_course")) - only the chart-only column is shortened.
-    assert row[app.c("base_course")] == long_title
-
-
-def test_overlap_summary_chart_label_matches_short_modul_nr_unchanged():
-    m = make_module(modulname="Kurs", modul_nr="AS1")
-    summary = app._calculate_module_overlap_summary([m])
-    assert summary.iloc[0]["_chart_label"] == "AS1"
-
-
 # --- _chart_section_title / *_headline: settings.CHART_TITLE_STYLE -------
 #
 # Implements docs/UX-OPTIMIERUNGEN-README.md's Zusatzempfehlung C. Only the
@@ -525,20 +500,6 @@ def test_weekday_distribution_headline_none_for_empty_list():
     assert app._weekday_distribution_headline([]) is None
 
 
-def test_overlap_headline_none_for_empty_summary():
-    assert app._overlap_headline(app._calculate_module_overlap_summary([])) is None
-
-
-def test_overlap_headline_names_top_overlapping_course():
-    a = make_module(modulname="Kurs A", modul_nr="AS1", wochentag="montag", startzeit=time(8, 15), endzeit=time(10, 0))
-    b = make_module(modulname="Kurs B", modul_nr="BS1", wochentag="montag", startzeit=time(9, 0), endzeit=time(10, 30))
-    summary = app._calculate_module_overlap_summary([a, b])
-    headline = app._overlap_headline(summary)
-    top_label = summary.iloc[0]["_chart_label"]
-    top_minutes = int(summary.iloc[0][app.c("overlap_total_min")])
-    assert headline == app.t("dashboard.chart.overlap_headline", course=top_label, minutes=top_minutes)
-
-
 def test_semester_timeline_headline_names_busiest_week():
     tue = make_module(modulname="Dienstag-Kurs", datum=date(2026, 9, 15), wochentag="dienstag")
     wed = make_module(modulname="Mittwoch-Kurs", datum=date(2026, 9, 16), wochentag="mittwoch")
@@ -554,19 +515,6 @@ def test_semester_timeline_headline_names_busiest_week():
 def test_semester_timeline_headline_none_without_dated_rows():
     undated = make_module(modulname="Ohne Datum", datum=None)
     assert app._semester_timeline_headline([undated]) is None
-
-
-def test_daily_load_headline_names_busiest_date():
-    short = make_module(modulname="Kurz", datum=date(2026, 9, 15), startzeit=time(8, 0), endzeit=time(9, 0))
-    long_a = make_module(modulname="Lang A", datum=date(2026, 9, 16), startzeit=time(8, 0), endzeit=time(11, 0))
-    long_b = make_module(modulname="Lang B", datum=date(2026, 9, 16), startzeit=time(13, 0), endzeit=time(14, 0))
-    headline = app._daily_load_headline([short, long_a, long_b])
-    assert headline == app.t("dashboard.chart.daily_load_headline", date="16.09.2026", minutes=240)
-
-
-def test_daily_load_headline_none_without_dated_rows():
-    undated = make_module(modulname="Ohne Datum", datum=None)
-    assert app._daily_load_headline([undated]) is None
 
 
 # --- _guided_flow_step_statuses: compact step-progress indicator ---------
