@@ -842,6 +842,36 @@ timing, squarely in the "`src/app.py`'s interactive UI has no automated
 test coverage by policy" bucket this section opened with. Verified only
 live with Playwright, as above.
 
+## Parallel groups, conflict rules and dark-mode regressions (2026-11)
+
+Tests added together with the "Gruppen" feature set and the UI bug round:
+
+- `tests/test_scheduler.py`: groups of the same course never conflict with each
+  other (`is_same_course`), but each group still conflicts with other courses;
+  different courses of the same module still conflict; the same Kurs-Nr in a
+  different module / origin (Haupt- vs. Zusatzliste) is *not* "the same course".
+- `tests/test_app_helpers.py`:
+  `_split_course_variant` recognises "... Gruppe A" without a slash and leaves
+  titles that merely contain the word "Gruppe" alone; `_selectable_group_names`
+  / `_group_conflict_overview` / `_undecided_group_courses` /
+  `_short_code_with_group` (free-vs-conflicting group, unticked group still
+  listed, common sessions counted in every group, no "Standard" row);
+  `_apply_chart_theme` (title colour in both themes, **no title created for
+  untitled figures** - that once rendered a literal "undefined" heading);
+  semester-grid trace order (grey "not selected" must be drawn first or it hides
+  the student's own selection); default palette size (>= 12 distinct colours, no
+  grey); export section without a selection never exports; upload error
+  classification (`upload.known_error` vs `upload.unexpected_error`).
+- `tests/test_data_loader.py`: `stats["dropped_rows"]` out-parameter.
+
+What these tests **cannot** catch (found only by looking at the running app in
+both themes): native `st.info/success/warning/error` boxes keeping Streamlit's
+light background in the app's dark mode (light text on a light box), dark chart
+titles on a dark background, and nearly invisible uploader hint texts. After any
+styling change, look at both themes in a real browser. Note for Playwright
+runs: stop old `streamlit run` processes on the same port first - a stale
+server keeps old imported modules and reports misleading `ImportError`s.
+
 ## Adding new tests
 
 - Match the file that already covers the module you're changing (see the
