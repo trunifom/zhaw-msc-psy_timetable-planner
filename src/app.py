@@ -678,6 +678,42 @@ def _inject_design_system_css() -> None:
             font-weight: 600;
         }}
         .zp-feedback-btn:hover {{ opacity: 0.9; }}
+
+        /* --- Typography scale: ONE family, a small set of sizes ----------
+           Measured before this block: two families (Streamlit's "Source
+           Sans" plus "Helvetica Neue" on buttons/expanders), eight sizes
+           (13.6 ... 44px), muted grey button text. Now:
+             title 2.1rem | page heading 1.5rem | section 1.15rem |
+             card title 1.05rem | body/labels/buttons 0.95rem | small 0.85rem
+           Colors: text (body), text-muted (captions only), accent (headings). */
+        .stApp, .stApp button, .stApp summary, .stApp input, .stApp textarea {{
+            font-family: "Source Sans", "Source Sans Pro", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }}
+        .stApp h1 {{ font-size: 2.1rem; }}
+        .stApp h2 {{ font-size: 1.6rem; }}
+        .stApp h3 {{ font-size: 1.5rem; }}
+        .stApp h4 {{ font-size: 1.15rem; }}
+        .stApp label, [data-testid="stWidgetLabel"] p,
+        [data-testid="stRadio"] label p, [data-testid="stCheckbox"] label p,
+        [data-baseweb="select"] div, [data-baseweb="input"] input,
+        [data-testid="stExpander"] summary, [data-testid="stExpander"] summary p,
+        .stButton button, .stDownloadButton button, [data-testid="stPopover"] button {{
+            font-size: 0.95rem;
+        }}
+        .stButton button, .stDownloadButton button, [data-testid="stPopover"] button {{
+            color: var(--zp-text);
+        }}
+        /* the "Hilfe" popover buttons stay small and unobtrusive */
+        [data-testid="stPopover"] button {{
+            font-size: 0.85rem; padding: 0.15rem 0.7rem; min-height: 0;
+            background: var(--zp-surface-hover) !important;
+            border: 1px solid var(--zp-border) !important;
+            color: var(--zp-text) !important;
+        }}
+        [data-testid="stPopoverBody"], [data-testid="stPopoverBody"] p {{
+            background: var(--zp-surface);
+            color: var(--zp-text);
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -956,6 +992,18 @@ def badge(text: str, kind: str = "info") -> str:
     return f'<span class="zp-badge zp-badge-{safe_kind}">{text}</span>'
 
 
+def _help_popover(body: str) -> None:
+    """
+    A compact "ℹ️ Hilfe" button that opens `body` (markdown) in a popover.
+    Keeps long explanations available on demand without leaving a wall of
+    grey text permanently on the page: pair it with ONE short caption line
+    that says what the section is, and put the 'how to read this'
+    explanation in here.
+    """
+    with st.popover(t("ui.help_button")):
+        st.markdown(body)
+
+
 def _apply_chart_theme(fig):
     """
     Apply the app's current color theme to a Plotly figure and return it
@@ -984,6 +1032,7 @@ def _apply_chart_theme(fig):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font_color=theme["text"],
+        font_family='"Source Sans", "Source Sans Pro", "Helvetica Neue", Helvetica, Arial, sans-serif',
         legend=dict(font_color=theme["text"]),
         xaxis=dict(gridcolor=theme["border"], zerolinecolor=theme["border"], linecolor=theme["border"]),
         yaxis=dict(gridcolor=theme["border"], zerolinecolor=theme["border"], linecolor=theme["border"]),
@@ -2780,7 +2829,8 @@ def _render_group_conflict_overview(selected_modules: List[Any], all_modules: Li
         return
     free_label = t("conflicts.groups_status_free")
     with card("conflicts-groups", "👥", t("conflicts.groups_title")):
-        st.caption(t("conflicts.groups_caption"))
+        st.caption(t("conflicts.groups_short"))
+        _help_popover(t("conflicts.groups_caption"))
         st.dataframe(
             _style_status_column(
                 overview,
@@ -3464,7 +3514,8 @@ def _render_semester_preview_grid(all_modules: List[Any], selected_modules: List
     couldn't be placed (no date). Split out from render_guided_planning()
     only to keep that already-very-long function's final section short.
     """
-    st.caption(t("guided.step3_preview_caption"))
+    st.caption(t("guided.step3_preview_short"))
+    _help_popover(t("guided.step3_preview_caption"))
     fig, excluded_undated, excluded_pruefungseinsicht = _semester_grid_figure(
         all_modules, selected_modules, color_sequence=_chart_palettes()["default"]
     )
@@ -6014,7 +6065,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             # though it's working as designed - e.g. an exam-only module
             # with "Prüfungen einschliessen" unchecked has nothing left to
             # choose (hence complete) and legitimately contributes zero rows.
-            st.caption(t("guided.module_status_caption"))
+            _help_popover(t("guided.module_status_caption"))
             status_tones = {
                 t("guided.status.complete"): "success",
                 t("guided.status.incomplete"): "warning",
@@ -6331,7 +6382,8 @@ def render_sidebar() -> None:
         st.markdown(f"**{t('sidebar.section.uploads')}**")
 
         with card("sidebar-data", "📚", t("sidebar.section.data")):
-            st.caption(t("sidebar.data_description"))
+            st.caption(t("sidebar.data_short"))
+            _help_popover(t("sidebar.data_description"))
 
             # Explicit `key=` (not just relying on Streamlit's auto-generated
             # widget identity): without it, this uploader lost its already-
@@ -6410,7 +6462,8 @@ def render_sidebar() -> None:
                 st.session_state.zusatz_uploader_version += 1
 
         with card("sidebar-data-zusatz", "🌉", t("sidebar.section.zusatzmodule")):
-            st.caption(t("sidebar.zusatzmodule.description"))
+            st.caption(t("sidebar.zusatzmodule.short"))
+            _help_popover(t("sidebar.zusatzmodule.description"))
 
             uploaded_file_zusatz = st.file_uploader(
                 t("sidebar.zusatzmodule.upload_label"),
@@ -6534,7 +6587,8 @@ def render_dashboard(modules: List) -> None:
 
     # --- 3) Attendance traffic light (see _attendance_status_dataframe).
     with card("dash-attendance", "🚦", t("dashboard.section.attendance")):
-        st.caption(t("dashboard.attendance.caption"))
+        st.caption(t("dashboard.attendance.short"))
+        _help_popover(t("dashboard.attendance.caption"))
         if attendance_df.empty:
             st.info(t("dashboard.attendance.none"))
         else:
