@@ -963,3 +963,55 @@ def test_active_filter_count_zero_after_reset():
     assert app._active_filter_count() == 2
     app._reset_all_filters()
     assert app._active_filter_count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Upload error classification / export without selection
+# ---------------------------------------------------------------------------
+
+
+class _FakeUpload:
+    def __init__(self, name: str, payload: bytes):
+        import io
+
+        self.name = name
+        self.file_id = "fake-id"
+        self._buf = io.BytesIO(payload)
+
+    def read(self, *args):
+        return self._buf.read(*args)
+
+    def seek(self, *args):
+        return self._buf.seek(*args)
+
+    def tell(self):
+        return self._buf.tell()
+
+
+def test_missing_columns_upload_is_reported_as_known_error_not_unexpected(monkeypatch):
+    """A file without the required columns is a user problem, not an app bug:
+    it must use upload.known_error (not upload.unexpected_error)."""
+    shown = []
+    monkeypatch.setattr(app.st, "error", lambda msg, *a, **k: shown.append(msg))
+    monkeypatch.setattr(app.st, "toast", lambda *a, **k: None)
+
+    app.handle_file_upload(_FakeUpload("x.csv", b"foo,bar\n1,2\n"))
+
+    assert len(shown) == 1
+    assert shown[0].startswith(app.t("upload.known_error", error="")[:15])
+    assert app.t("upload.unexpected_error", error="")[:15] not in shown[0]
+
+
+def test_export_section_without_selection_shows_info_and_never_exports_everything(monkeypatch):
+    infos = []
+    monkeypatch.setattr(app.st, "subheader", lambda *a, **k: None)
+    monkeypatch.setattr(app.st, "info", lambda msg, *a, **k: infos.append(msg))
+
+    def _boom(*a, **k):  # must never be reached for an empty selection
+        raise AssertionError("export generated for empty selection")
+
+    monkeypatch.setattr(app, "prepare_timetable_for_export", _boom)
+
+    app.render_export_section([])
+
+    assert infos == [app.t("export.no_selection")]

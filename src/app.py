@@ -1145,6 +1145,14 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
             st.error(t("upload.unsupported"))
             return
 
+    except DataLoaderError as dle:
+        # Expected, user-caused problem (wrong/unsuitable file: missing
+        # columns, nothing parseable, ...). Previously fell through to the
+        # generic branch below and was shown as an "unexpected error" with
+        # a full ERROR traceback in the log - misleading for the student
+        # and noisy for whoever reads the log.
+        logger.warning(f"Upload rejected: {dle}")
+        st.error(t("upload.known_error", error=_format_user_facing_error(dle)))
     except ValueError as ve:
         # Catches both a raw pandas parser error (e.g. a malformed CSV -
         # pandas.errors.ParserError subclasses ValueError) and, in principle,
@@ -1191,10 +1199,14 @@ def render_export_section(modules: List) -> None:
     is generated/downloaded, rather than silently offering a download of
     whatever happens to be selected at the moment.
     """
-    if not modules:
-        return  # Nichts anzeigen, wenn noch keine Daten da sind
-
     st.subheader(t("export.subheader"))
+
+    if not modules:
+        # Nothing selected yet: say so instead of silently rendering an
+        # empty card (callers must NOT substitute the full course catalog
+        # here - exporting every offered course as "my plan" is wrong).
+        st.info(t("export.no_selection"))
+        return
 
     st.session_state.planning_finalized = st.checkbox(
         t("export.finalize_checkbox"),
@@ -5962,7 +5974,7 @@ def render_sidebar() -> None:
         # original placement, kept for pilot comparison).
         if settings.EXPORT_SECTION_PLACEMENT == "sidebar" and st.session_state.processed_modules:
             st.divider()
-            modules_for_export = st.session_state.get("selected_modules") or st.session_state.processed_modules
+            modules_for_export = st.session_state.get("selected_modules") or []
             render_export_section(modules_for_export)
 
 
@@ -7053,7 +7065,7 @@ def main() -> None:
     if settings.EXPORT_SECTION_PLACEMENT == "main" and st.session_state.processed_modules:
         with card("export-section"):
             st.markdown(f"#### {t('app.step_progress.export')}")
-            render_export_section(selected_modules or st.session_state.processed_modules)
+            render_export_section(selected_modules)
 
 # ==========================================
 # ENTRY POINT
