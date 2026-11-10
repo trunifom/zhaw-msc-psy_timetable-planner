@@ -1029,3 +1029,14 @@ def test_semester_grid_draws_unselected_grey_trace_first_so_selection_stays_visi
     assert unselected in names
     assert names[0] == unselected
     assert len(names) == 2
+
+
+def test_apply_chart_theme_colors_title_with_theme_text_color(monkeypatch):
+    """Regression: chart titles were dark-on-dark in the dark theme."""
+    import plotly.express as px
+
+    for theme_name in ("dark", "light"):
+        monkeypatch.setitem(app.st.session_state, "ui_theme", theme_name)
+        fig = px.bar(x=[1, 2], y=[3, 4], title="Titel")
+        themed = app._apply_chart_theme(fig)
+        assert themed.layout.title.font.color == app.THEME_TOKENS[theme_name]["text"]

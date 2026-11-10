@@ -569,6 +569,30 @@ def _inject_design_system_css() -> None:
         .zp-badge-danger  {{ background: var(--zp-danger-bg);  color: var(--zp-danger); }}
         .zp-badge-info    {{ background: var(--zp-info-bg);    color: var(--zp-info); }}
 
+        /* Small helper texts that Streamlit colors itself (uploader size
+           hint, "?" help icons) were nearly invisible on the dark surface. */
+        [data-testid="stFileUploaderDropzoneInstructions"],
+        [data-testid="stFileUploaderDropzoneInstructions"] * {{ color: var(--zp-text-muted) !important; }}
+        [data-testid="stTooltipIcon"],
+        [data-testid="stTooltipIcon"] svg {{ color: var(--zp-text-muted) !important; opacity: 1 !important; }}
+
+        /* --- Native st.info/success/warning/error boxes -------------
+           Streamlit paints these with ITS OWN (light-base-theme) tinted
+           backgrounds, independent of this app's CSS-only dark toggle,
+           while the global text color above turns light in dark mode ->
+           light text on a light box (unreadable). Re-skin them from the
+           semantic theme tokens so box and text always match the active
+           theme. The kind is read from the inner stAlertContent<Kind>
+           test-id; :has() is supported by all current browsers. */
+        [data-testid="stAlertContainer"] {{ color: var(--zp-text); border-radius: 8px; }}
+        [data-testid="stAlertContainer"] p,
+        [data-testid="stAlertContainer"] li,
+        [data-testid="stAlertContainer"] span {{ color: var(--zp-text); }}
+        [data-testid="stAlertContainer"]:has([data-testid="stAlertContentInfo"])    {{ background: var(--zp-info-bg); }}
+        [data-testid="stAlertContainer"]:has([data-testid="stAlertContentSuccess"]) {{ background: var(--zp-success-bg); }}
+        [data-testid="stAlertContainer"]:has([data-testid="stAlertContentWarning"]) {{ background: var(--zp-warning-bg); }}
+        [data-testid="stAlertContainer"]:has([data-testid="stAlertContentError"])   {{ background: var(--zp-danger-bg); }}
+
         /* --- Feedback tab (see _render_feedback_widget) -----------
            A small tab pinned to the right edge, vertically centered, that
            mostly peeks out from behind the viewport edge at rest (low-key,
@@ -954,6 +978,9 @@ def _apply_chart_theme(fig):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font_color=theme["text"],
+        # Plotly's own title font does not inherit font_color when the title
+        # is set via px's `title=` - was dark-on-dark in the dark theme.
+        title_font_color=theme["text"],
         legend=dict(font_color=theme["text"]),
         xaxis=dict(gridcolor=theme["border"], zerolinecolor=theme["border"], linecolor=theme["border"]),
         yaxis=dict(gridcolor=theme["border"], zerolinecolor=theme["border"], linecolor=theme["border"]),
