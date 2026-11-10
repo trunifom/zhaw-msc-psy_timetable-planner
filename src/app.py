@@ -108,6 +108,18 @@ except ImportError as e:
     st.error(get_text("de", "system.backend_missing", error=e))
 
 
+def _context_theme_type() -> Optional[str]:
+    """
+    `st.context.theme.type` (browser/OS theme) exists only in recent
+    Streamlit versions; older ones raise AttributeError at import time.
+    Returns None in that case, which _resolve_default_theme() maps to "light".
+    """
+    try:
+        return st.context.theme.type
+    except Exception:
+        return None
+
+
 def _resolve_default_theme(context_theme_type: Optional[str] = None) -> str:
     """
     Decide which theme ("light"/"dark") a brand-new session should
@@ -156,7 +168,7 @@ st.set_page_config(
 # _resolve_default_theme() per settings.DEFAULT_THEME; dark always stays one
 # click away via the sidebar toggle regardless of this setting.
 if "ui_theme" not in st.session_state:
-    st.session_state.ui_theme = _resolve_default_theme(st.context.theme.type)
+    st.session_state.ui_theme = _resolve_default_theme(_context_theme_type())
 
 # Keep ui_theme in sync with the sidebar toggle's own widget state BEFORE
 # the CSS is generated below. Without this, toggling the theme would look
@@ -775,7 +787,7 @@ def init_session_state() -> None:
     if 'ui_language' not in st.session_state:
         st.session_state.ui_language = "de"
     if 'ui_theme' not in st.session_state:
-        st.session_state.ui_theme = _resolve_default_theme(st.context.theme.type)
+        st.session_state.ui_theme = _resolve_default_theme(_context_theme_type())
 
 
 def t(key: str, **kwargs: object) -> str:
