@@ -4071,15 +4071,21 @@ def _weekday_bar_figure(modules: List[Any], color_sequence: list[str] | None = N
     redundancy (removing it also frees up chart width for the bars)."""
     if not modules:
         return None
-    df = pd.DataFrame({c("weekday"): [_weekday_label(m) for m in modules]})
     order = _weekday_labels_in_order()
+    # Aggregate first: px.bar's implicit count stacks one segment per row,
+    # which draws horizontal stripes inside every bar.
+    counts = pd.Series([_weekday_label(m) for m in modules]).value_counts()
+    # Mon-Fri always; Saturday/Sunday only if something actually takes place then.
+    order = [day for index, day in enumerate(order) if index < 5 or counts.get(day, 0) > 0]
+    df = pd.DataFrame({c("weekday"): order, "_count": [int(counts.get(day, 0)) for day in order]})
     fig = px.bar(
         df,
         x=c("weekday"),
-        color=c("weekday"),
-        color_discrete_sequence=color_sequence,
+        y="_count",
+        color_discrete_sequence=color_sequence,  # one series -> the palette's first colour for every bar
         title=t("chart.weekday_title"),
         category_orders={c("weekday"): order},
+        labels={"_count": t("chart.yaxis_items")},
     )
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=40, b=10), yaxis_title=t("chart.yaxis_items"), showlegend=False)
     return _apply_chart_theme(fig)
@@ -6332,85 +6338,47 @@ def render_dashboard(modules: List) -> None:
     absence_rules = _absence_rules_summary(absence_settings)
     absence_selected_df = _absence_conflict_dataframe(modules, absence_settings)
 
-    with card("dash-metrics", "📊", t("dashboard.section.metrics")):
-        # No ECTS-total tile here on purpose: the source data's ECTS values
-        # aren't reliable/trackable yet (see data_loader.py - a missing ECTS
-        # column is silently defaulted to 0), so showing a "total ECTS"
-        # number could look authoritative while actually being wrong or
-        # incomplete. Hidden for now, not deleted - re-add
-        # `st.metric(t("dashboard.metric.ects"), total_ects)` (and widen this
-        # back to 4 columns) once ECTS tracking is actually trustworthy.
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric(t("dashboard.metric.rows"), total_modules)
-        with col2:
-            st.metric(t("dashboard.metric.base_courses"), selected_base_count)
-        with col3:
-            st.metric(t("dashboard.metric.exams"), total_pruefungen)
+    zusatz_uploaded = bool(st.session_state.get("processed_modules_zusatz"))
+    attendance_df = _attendance_status_dataframe(modules, absence_settings)
+    exam_df = _calculate_exam_feasibility(modules)
 
-        col5, col6 = st.columns(2)
-        with col5:
-            st.metric(t("dashboard.metric.weekdays"), unique_days)
-        with col6:
-            st.metric(t("dashboard.metric.lessons"), lessons_per_week)
-            st.caption(t("dashboard.metric.lessons_caption", hours=hours_per_week, weeks=observed_weeks))
+    # --- 1) At a glance: the four numbers + one statement about conflicts.
+    # (The old tab showed ~9 tiles, absence-rule counters, three more
+    # KPI tables and four charts; most answered no decision a student has to
+    # make. No ECTS tile on purpose: the source ECTS values aren't reliable,
+    # see data_loader.py.)
+    with card("dash-metrics", "📊", t("dashboard.section.glance")):
+        metric_cols = st.columns(5 if zusatz_uploaded else 4)
+        metric_cols[0].metric(t("dashboard.metric.base_courses"), selected_base_count)
+        metric_cols[1].metric(t("dashboard.metric.rows"), total_modules)
+        metric_cols[2].metric(t("dashboard.metric.exams"), total_pruefungen)
+        metric_cols[3].metric(t("dashboard.metric.conflict_pairs"), len(conflict_pairs))
+        if zusatz_uploaded:
+            metric_cols[4].metric(
+                t("dashboard.metric.zusatzmodule"), sum(1 for m in modules if getattr(m, "ist_zusatzmodul", False))
+            )
+        st.caption(t("dashboard.glance.workload", hours=hours_per_week, lessons=lessons_per_week, weeks=observed_weeks))
         _render_undecided_groups_note(modules)
-
-        # Only shown when a Zusatzmodule upload actually exists - checked
-        # against the full combined dataset (processed_modules_
-        # zusatz), not `modules` (the current selection), since the tile
-        # should still show "0" for a Passerelle student who uploaded a
-        # Zusatzmodule list but hasn't selected any of it yet - not
-        # disappear entirely, which would look like the upload didn't work.
-        zusatz_uploaded = bool(st.session_state.get("processed_modules_zusatz"))
-        if zusatz_uploaded:
-            col7, col8, col9 = st.columns(3)
+        if conflict_pairs:
+            st.warning(t("dashboard.glance.conflicts", count=len(conflict_pairs)))
         else:
-            col7, col8 = st.columns(2)
-        with col7:
-            st.metric(t("dashboard.metric.absence_rules"), len(absence_rules))
-        with col8:
-            st.metric(t("dashboard.metric.absence_rows"), len(absence_selected_df))
-        if zusatz_uploaded:
-            with col9:
-                zusatz_selected_count = sum(1 for m in modules if getattr(m, "ist_zusatzmodul", False))
-                st.metric(t("dashboard.metric.zusatzmodule"), zusatz_selected_count)
+            st.success(t("conflicts.none"))
 
-    # Condensed on purpose: this card used to also reproduce the "all
-    # offered courses" absence-conflict table (identical in shape/content to
-    # render_conflict_analysis's "conflicts-absence" card, just with a
-    # different .head() truncation cap) - a dashboard should answer "does MY
-    # current selection have a problem" in one glance, not re-render another
-    # tab's deep-dive wholesale. Only the selection-specific status stays
-    # here, with a pointer below instead of a duplicate render. The
-    # per-course attendance traffic light IS duplicated below (dash-
-    # attendance card), deliberately - unlike the absence-conflict detail
-    # table, it's the one thing students said they want visible immediately
-    # without digging into the Konflikte tab first.
-    with card("dash-absence", "🧭", t("dashboard.section.absence")):
-        if not absence_rules:
-            st.info(t("dashboard.absence.none"))
-        else:
+    # --- 2) Absence: only when rules are actually active (no card full of
+    # "none" otherwise). The full breakdown lives in the conflict tab.
+    if absence_rules:
+        with card("dash-absence", "🧭", t("dashboard.section.absence")):
             st.caption(t("dashboard.absence.active"))
             for rule in absence_rules:
                 st.markdown(f"- {rule}")
-
-            st.markdown(t("dashboard.absence.current_selection"))
             if absence_selected_df.empty:
                 st.success(t("dashboard.absence.current_selection_none"))
             else:
                 st.warning(t("dashboard.absence.current_selection_conflicts", count=len(absence_selected_df)))
                 st.dataframe(_style_absence_rows(absence_selected_df, c("reason")), hide_index=True, width="stretch")
-
             st.caption(t("dashboard.absence.see_conflicts_tab"))
 
-    # Always visible regardless of absence-rule configuration - see
-    # _attendance_status_dataframe()'s docstring for the red/orange/green
-    # logic. This is the "Anwesenheits-Ampel" from the 2026-09 planning
-    # meeting: students should know at a glance whether their current
-    # selection realistically satisfies each course's attendance
-    # requirement, even before touching the absence-rule widgets.
-    attendance_df = _attendance_status_dataframe(modules, absence_settings)
+    # --- 3) Attendance traffic light (see _attendance_status_dataframe).
     with card("dash-attendance", "🚦", t("dashboard.section.attendance")):
         st.caption(t("dashboard.attendance.caption"))
         if attendance_df.empty:
@@ -6423,13 +6391,7 @@ def render_dashboard(modules: List) -> None:
                 column_config=_attendance_column_config(),
             )
 
-    # Passerelle-specific, only shown when a Zusatzmodule (Bachelor) upload
-    # exists at all - see find_critical_first_session_conflicts()'s
-    # docstring in scheduler.py for why a collision on a course's 1st/2nd
-    # session is much higher-stakes than a later one. Deliberately a short
-    # hint here, NOT the full detail table (unlike dash-attendance above) -
-    # the student-approved design for this feature keeps the full
-    # breakdown exclusively in the Konflikte tab.
+    # --- 4) Passerelle-specific hint (short; details in the conflict tab).
     if zusatz_uploaded:
         critical_first_sessions = find_critical_first_session_conflicts(modules, _module_course_family_key)
         with card("dash-passerelle-critical", "🎓", t("dashboard.section.passerelle_critical")):
@@ -6439,155 +6401,13 @@ def render_dashboard(modules: List) -> None:
             else:
                 st.error(t("dashboard.passerelle_critical.found", count=len(critical_first_sessions)))
                 st.caption(t("dashboard.passerelle_critical.see_conflicts_tab"))
-            # Kept short above (dashboard = glanceable, per this app's own
-            # "does MY current selection have a problem" principle - see the
-            # comment on the dash-absence card above) - the full rationale
-            # and actionable tips live in this collapsed expander instead of
-            # bloating the always-visible card. Same shared text as the
-            # Konflikte-tab card below (passerelle_critical.* keys, not
-            # dashboard.*/conflicts.* scoped) - one source of truth so the
-            # explanation can never drift between the two places it appears.
             with st.expander(t("passerelle_critical.why_expander_title"), expanded=False):
                 st.markdown(t("passerelle_critical.why_body"))
                 st.markdown(t("passerelle_critical.tips_body"))
 
-    overlap_summary = _calculate_module_overlap_summary(modules)
-    exam_df = _calculate_exam_feasibility(modules)
-
-    # --- Visuals: each chart gets its own collapsed "settings" panel
-    # (palette/scale, weekday filter, extra chart-specific options) via
-    # _render_chart_toolbar() - see that function's docstring for the
-    # rationale (progressive disclosure: advanced controls stay out of the
-    # way until opened, but every chart is genuinely user-customizable
-    # rather than a fixed, one-size-fits-all image). ------------------
-    with card("dash-visuals", "📈", t("dashboard.section.visuals")):
-        chart_col1, chart_col2 = st.columns([1.2, 1])
-        with chart_col1:
-            st.markdown(_chart_section_title("dashboard.chart.weekday_title", _weekday_distribution_headline(modules)))
-            st.caption(t("dashboard.chart.weekday_caption"))
-            weekday_modules, weekday_palette, _ = _render_chart_toolbar(
-                "dash_weekday", modules, show_weekday_filter=True
-            )
-            fig = _weekday_bar_figure(weekday_modules, color_sequence=weekday_palette)
-            if fig is not None:
-                st.plotly_chart(fig, use_container_width=True)
-                # The chart's one-sentence "headline" (see _busiest_weekday's
-                # docstring) - states the takeaway directly instead of
-                # leaving a non-technical reader to compare bar heights
-                # themselves. Computed from weekday_modules (the toolbar's
-                # filtered set), so it always matches what the chart above
-                # it actually shows, even when weekdays are filtered out.
-                busiest_day, busiest_count = _busiest_weekday(weekday_modules)
-                if busiest_day:
-                    st.caption(t("dashboard.chart.weekday_insight", day=busiest_day, count=busiest_count))
-            else:
-                # Previously silent (no chart, no message) whenever
-                # weekday_modules ended up empty - which used to happen
-                # invisibly via a stale weekday-filter selection (see
-                # _render_chart_toolbar's fix for that). Kept as a fallback
-                # even after that fix, so a genuinely empty filter result
-                # always explains itself instead of leaving a mysterious gap.
-                st.info(t("dashboard.chart.no_data"))
-        with chart_col2:
-            st.markdown(_chart_section_title("dashboard.chart.overlap_title", _overlap_headline(overlap_summary)))
-            st.caption(t("dashboard.chart.overlap_caption"))
-            _, overlap_scale, _ = _render_chart_toolbar(
-                "dash_overlap", modules, continuous=True, show_weekday_filter=False
-            )
-            fig = _overlap_bar_figure(overlap_summary, color_scale=overlap_scale)
-            if fig is not None:
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info(t("dashboard.chart.no_data"))
-
-        st.divider()
-        st.markdown(_chart_section_title("dashboard.section.semester_timeline", _semester_timeline_headline(modules)))
-        st.caption(t("dashboard.chart.semester_caption"))
-        timeline_modules, timeline_palette, timeline_choices = _render_chart_toolbar(
-            "dash_timeline",
-            modules,
-            show_weekday_filter=True,
-            extra_options={
-                "color_by": [
-                    (t("chart.color_by_module"), "module"),
-                    (t("chart.color_by_type"), "type"),
-                ],
-                # "heatmap"/"list" are the two new week-centric views (docs/
-                # UX-OPTIMIERUNGEN-README.md Punkt 3); "scatter" is the
-                # original _semester_timeline_figure() view, kept available
-                # side by side at the user's explicit request for
-                # comparison before any decision to remove it.
-                "view_mode": [
-                    (t("chart.view_mode_scatter"), "scatter"),
-                    (t("chart.view_mode_heatmap"), "heatmap"),
-                    (t("chart.view_mode_list"), "list"),
-                ],
-            },
-        )
-        timeline_view_mode = timeline_choices.get("view_mode", "scatter")
-        if timeline_view_mode in ("heatmap", "list"):
-            # Conflicts are recomputed from timeline_modules (the
-            # weekday-filtered view these two views actually render), not
-            # the tab's full `modules`/`conflict_pairs` - a conflict whose
-            # partner session was just filtered out of view shouldn't
-            # still show a warning glyph/marker here.
-            timeline_conflict_dates = {
-                m.datum for pair in find_time_conflicts(timeline_modules) for m in pair if getattr(m, "datum", None) is not None
-            }
-        if timeline_view_mode == "heatmap":
-            semester_timeline = _semester_heatmap_figure(timeline_modules, conflict_dates=timeline_conflict_dates)
-            if semester_timeline is not None:
-                st.plotly_chart(semester_timeline, use_container_width=True)
-            else:
-                st.info(t("dashboard.chart.no_dated_rows"))
-        elif timeline_view_mode == "list":
-            _render_semester_week_list(timeline_modules, conflict_dates=timeline_conflict_dates)
-        else:
-            semester_timeline = _semester_timeline_figure(
-                timeline_modules, color_sequence=timeline_palette, color_by=timeline_choices.get("color_by", "module")
-            )
-            if semester_timeline is not None:
-                st.plotly_chart(semester_timeline, use_container_width=True)
-            else:
-                st.info(t("dashboard.chart.no_dated_rows"))
-
-        st.divider()
-        st.markdown(_chart_section_title("dashboard.section.daily_load", _daily_load_headline(modules)))
-        st.caption(t("dashboard.chart.daily_load_caption"))
-        load_modules, load_palette, load_choices = _render_chart_toolbar(
-            "dash_load",
-            modules,
-            show_weekday_filter=True,
-            extra_options={
-                # st.radio (inside _render_chart_toolbar) defaults to the
-                # first option, so "split by module" listed first here is
-                # what makes it the default view for this chart.
-                "view_mode": [
-                    (t("chart.view_by_module"), "split"),
-                    (t("chart.view_total"), "total"),
-                ]
-            },
-        )
-        daily_load = _daily_load_figure(
-            load_modules, color_sequence=load_palette, split_by_module=load_choices.get("view_mode") == "split"
-        )
-        if daily_load is not None:
-            st.plotly_chart(daily_load, use_container_width=True)
-        else:
-            st.info(t("dashboard.chart.no_dated_rows"))
-
-    with card("dash-kpis", "🧮", t("dashboard.section.kpis").strip("*")):
-        summary_table = pd.DataFrame(
-            [
-                {c("metric"): t("dashboard.kpi.conflict_pairs"), c("value"): len(conflict_pairs)},
-                {c("metric"): t("dashboard.kpi.modules_overlap"), c("value"): int((overlap_summary[c("overlap_total_min")] > 0).sum()) if not overlap_summary.empty else 0},
-                {c("metric"): t("dashboard.kpi.avg_overlap"), c("value"): round(overlap_summary[c("overlap_total_min")].mean(), 1) if not overlap_summary.empty else 0},
-            ]
-        )
-        st.dataframe(summary_table, hide_index=True, width="stretch")
-
-        if not exam_df.empty:
-            st.markdown(t("dashboard.section.exam_status"))
+    # --- 5) Exams (own small card instead of a table buried under KPIs).
+    if not exam_df.empty:
+        with card("dash-exams", "📝", t("dashboard.section.exams")):
             exam_status_tones = {
                 t("exam.status_ok"): "success",
                 t("exam.status_conflict"): "danger",
@@ -6600,24 +6420,41 @@ def render_dashboard(modules: List) -> None:
                 column_config={c("date"): st.column_config.DateColumn(c("date"), format="DD.MM.YYYY")},
             )
 
-        if not overlap_summary.empty:
-            st.markdown(t("dashboard.section.overlap_rate"))
-            st.dataframe(
-                # Same sequential-red severity encoding as the detailed
-                # conflict table in render_conflict_analysis (higher
-                # overlap % = darker red) - one visual language for
-                # "how bad is this overlap" across every tab, not a
-                # different treatment per table.
-                _style_sequential_red(overlap_summary, c("overlap_pct")),
-                hide_index=True,
-                width="stretch",
-                column_config={
-                    c("duration_min"): st.column_config.NumberColumn(c("duration_min"), format="%d min"),
-                    c("occurrences"): st.column_config.NumberColumn(c("occurrences"), width="small"),
-                    c("overlap_total_min"): st.column_config.NumberColumn(c("overlap_total_min"), format="%d min"),
-                    c("overlap_pct"): st.column_config.NumberColumn(c("overlap_pct"), format="%.1f %%"),
-                },
-            )
+    # --- 6) Two charts only: busiest weekday (one colour) and the semester
+    # at week level. Removed: overlap-minutes bar, scatter timeline (same
+    # information as the guided-planning step-3 grid), daily-load bars and
+    # the per-chart palette/filter panels.
+    with card("dash-visuals", "📈", t("dashboard.section.visuals")):
+        st.markdown(_chart_section_title("dashboard.chart.weekday_title", _weekday_distribution_headline(modules)))
+        st.caption(t("dashboard.chart.weekday_caption"))
+        fig = _weekday_bar_figure(modules, color_sequence=_chart_palettes()["default"])
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info(t("dashboard.chart.no_data"))
+
+        st.divider()
+        st.markdown(_chart_section_title("dashboard.section.semester_timeline", _semester_timeline_headline(modules)))
+        st.caption(t("dashboard.chart.semester_caption"))
+        view_options = {t("chart.view_mode_heatmap"): "heatmap", t("chart.view_mode_list"): "list"}
+        chosen_view = st.radio(
+            t("dashboard.semester_view_label"),
+            options=list(view_options),
+            horizontal=True,
+            key="dash_semester_view",
+        )
+        conflict_dates = {
+            m.datum for pair in conflict_pairs for m in pair if getattr(m, "datum", None) is not None
+        }
+        if view_options[chosen_view] == "list":
+            _render_semester_week_list(modules, conflict_dates=conflict_dates)
+        else:
+            semester_timeline = _semester_heatmap_figure(modules, conflict_dates=conflict_dates)
+            if semester_timeline is not None:
+                st.plotly_chart(semester_timeline, use_container_width=True)
+            else:
+                st.info(t("dashboard.chart.no_dated_rows"))
+
 
 def render_timetable(modules: List) -> None:
     """

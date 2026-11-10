@@ -1168,3 +1168,14 @@ def test_conflict_pair_sentences_groups_dates_per_course_pair_and_keeps_groups_a
     assert sentences[0]["count"] == 2
     assert "Gruppe A" in sentences[0]["a"] + sentences[0]["b"]
     assert app._conflict_pair_sentences([]) == []
+
+
+def test_weekday_bar_figure_is_aggregated_one_bar_per_weekday():
+    mods = [
+        make_module(modulname="Kurs Eins", wochentag="montag"),
+        make_module(modulname="Kurs Zwei", wochentag="montag", startzeit="12:00", endzeit="13:00"),
+        make_module(modulname="Kurs Drei", wochentag="dienstag"),
+    ]
+    fig = app._weekday_bar_figure(mods, color_sequence=["#0064A6"])
+    assert len(fig.data) == 1
+    assert list(fig.data[0].y) == [2, 1, 0, 0, 0]
