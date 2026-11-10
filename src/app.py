@@ -5669,7 +5669,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                                 c("course_component"): fam_key,
                                 c("component_type"): t("guided.component_choice"),
                                 c("selection"): ", ".join(chosen) if chosen else t("guided.not_selected"),
-                                c("variants"): ", ".join(variant_names),
+                                c("variants"): ", ".join(group_names),
                             }
                         )
 
