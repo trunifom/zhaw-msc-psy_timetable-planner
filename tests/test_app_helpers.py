@@ -1081,3 +1081,59 @@ def test_split_course_variant_recognizes_space_separated_group_suffix():
 def test_split_course_variant_keeps_titles_that_merely_contain_the_word_gruppe():
     for title in ("Gruppe der Primaten", "Arbeiten in Gruppen", "Psychologie der Gruppe"):
         assert app._split_course_variant(title) == (title, "", False)
+
+
+def _group_scenario():
+    """DIG1-2 has Gruppe A (Mon 5 Oct) and Gruppe B (Tue 6 Oct, other day);
+    AKP10-1 sits on Mon 5 Oct, so only Gruppe A collides with it."""
+    ga = make_module(modulname="Vertiefung Digitalisierung Gruppe A", modul_nr="DIG1", kurs_nr="DIG1-2", datum=date(2026, 10, 5))
+    gb = make_module(modulname="Vertiefung Digitalisierung Gruppe B", modul_nr="DIG1", kurs_nr="DIG1-2", wochentag="dienstag", datum=date(2026, 10, 6))
+    akp = make_module(modulname="Decision-making Theory", modul_nr="AKP10", kurs_nr="AKP10-1", datum=date(2026, 10, 5))
+    return ga, gb, akp
+
+
+def test_group_conflict_overview_shows_which_group_is_free():
+    ga, gb, akp = _group_scenario()
+    overview = app._group_conflict_overview([ga, gb, akp], [ga, gb, akp])
+    assert len(overview) == 2
+    by_group = {row[app.c("group")]: row for _, row in overview.iterrows()}
+    assert by_group["Gruppe A"][app.c("status")] == app.t("conflicts.groups_status_conflict")
+    assert by_group["Gruppe A"][app.c("group_conflicts")] == 1
+    assert "AKP10-1" in by_group["Gruppe A"][app.c("group_collides_with")]
+    assert by_group["Gruppe B"][app.c("status")] == app.t("conflicts.groups_status_free")
+
+
+def test_group_conflict_overview_still_lists_a_group_the_student_unticked():
+    ga, gb, akp = _group_scenario()
+    overview = app._group_conflict_overview([gb, akp], [ga, gb, akp])  # Gruppe A not selected
+    by_group = {row[app.c("group")]: row for _, row in overview.iterrows()}
+    assert by_group["Gruppe A"][app.c("group_selected")] == "–"
+    assert by_group["Gruppe A"][app.c("status")] == app.t("conflicts.groups_status_conflict")
+    assert by_group["Gruppe B"][app.c("group_selected")] == "✓"
+
+
+def test_group_conflict_overview_is_empty_without_multi_group_courses():
+    a = make_module(modulname="Einzelkurs", modul_nr="X1", kurs_nr="X1-1", datum=date(2026, 10, 5))
+    b = make_module(modulname="Anderer Kurs", modul_nr="X2", kurs_nr="X2-1", datum=date(2026, 10, 5))
+    assert app._group_conflict_overview([a, b], [a, b]).empty
+
+
+def test_selectable_group_names_drops_standard_only_next_to_two_real_groups():
+    assert app._selectable_group_names(["GRUPPE A", "GRUPPE B", "GRUPPE C", "STANDARD"]) == [
+        "GRUPPE A",
+        "GRUPPE B",
+        "GRUPPE C",
+    ]
+    # one real group + STANDARD, or no STANDARD: unchanged behaviour
+    assert app._selectable_group_names(["GRUPPE A", "STANDARD"]) == ["GRUPPE A", "STANDARD"]
+    assert app._selectable_group_names(["GRUPPE A", "GRUPPE B"]) == ["GRUPPE A", "GRUPPE B"]
+
+
+def test_group_overview_counts_common_sessions_in_every_group_and_hides_standard_row():
+    ga, gb, akp = _group_scenario()
+    # common session (no group suffix) of the same course, colliding with AKP10 on Mon 5 Oct
+    common = make_module(modulname="Vertiefung Digitalisierung", modul_nr="DIG1", kurs_nr="DIG1-2", datum=date(2026, 10, 5))
+    overview = app._group_conflict_overview([ga, gb, common, akp], [ga, gb, common, akp])
+    assert set(overview[app.c("group")]) == {"Gruppe A", "Gruppe B"}  # no "Standard" row
+    # the common session collides with AKP10 -> BOTH groups are in conflict now
+    assert set(overview[app.c("status")]) == {app.t("conflicts.groups_status_conflict")}

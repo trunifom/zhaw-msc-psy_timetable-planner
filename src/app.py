@@ -2141,6 +2141,18 @@ def _module_group_display(module_key: str, modules: List[Any]) -> str:
     return f"{module_key} - {base}"
 
 
+def _selectable_group_names(variant_names: list[str]) -> list[str]:
+    """
+    The variant labels of one course component a student can pick between.
+    "STANDARD" (= no group suffix) is dropped as soon as at least two REAL
+    groups exist next to it - those rows are sessions common to all groups
+    (see render_guided_planning); with fewer real groups nothing is dropped
+    (behaves exactly as before).
+    """
+    real = [v for v in variant_names if v != "STANDARD"]
+    return real if len(real) >= 2 and "STANDARD" in variant_names else list(variant_names)
+
+
 def _module_variant_label(module: Any) -> str:
     """Return the normalized variant label used to decide, within one course
     family (see _module_course_family_key), whether rows are interchangeable
@@ -2630,6 +2642,119 @@ def _summarize_conflicts(conflicts: List[Tuple[Any, Any]]) -> pd.DataFrame:
         )
 
     return pd.DataFrame(rows).sort_values([c("overlap_total_min"), c("conflict_days_count")], ascending=[False, False])
+
+
+def _course_identity(module: Any) -> tuple[str, str, bool]:
+    """(Modul-Nr, Kurs-Nr, ist_zusatzmodul) - the key scheduler.is_same_course() also uses."""
+    return (
+        str(getattr(module, "modul_nr", "") or "").strip(),
+        str(getattr(module, "kurs_nr", "") or "").strip(),
+        bool(getattr(module, "ist_zusatzmodul", False)),
+    )
+
+
+def _partner_label(module: Any) -> str:
+    """Short 'KURS-NR Gruppe A' label for the 'collides with' column."""
+    kurs_nr = _course_identity(module)[1] or _split_course_variant(module.modulname)[0]
+    variant = _split_course_variant(module.modulname)[1]
+    return f"{kurs_nr} {variant.title()}".strip() if variant else kurs_nr
+
+
+def _group_conflict_overview(selected_modules: List[Any], all_modules: List[Any]) -> pd.DataFrame:
+    """
+    One row per GROUP (e.g. "GRUPPE A") of every selected course that is
+    offered in two or more groups, answering: "if I were in this group,
+    which other courses of my selection would it collide with?"
+
+    Conflicts are only ever evaluated against OTHER courses of the selection
+    (groups of the same course never collide with each other, see
+    scheduler.is_same_course) - so a group that shows "Frei" really is
+    conflict-free, and a student can see e.g. that DIG1-2 Gruppe A clashes
+    with AKP10 while Gruppe B does not. Groups come from `all_modules` (not
+    only from what is currently ticked), so a group the student already
+    unticked is still shown - exactly the "what if" information useful when
+    deciding. Exam rows are ignored (they are no group offering).
+    Returns an empty DataFrame when no selected course has 2+ groups.
+    """
+
+    def _is_group_candidate(module: Any) -> bool:
+        return bool(_course_identity(module)[1]) and not _is_exam_row(module)
+
+    selected_courses = {_course_identity(m) for m in selected_modules if _is_group_candidate(m)}
+    selected_ids = {id(m) for m in selected_modules}
+
+    groups: dict[tuple[str, str, bool], dict[str, list[Any]]] = {}
+    for module in all_modules:
+        if not _is_group_candidate(module):
+            continue
+        identity = _course_identity(module)
+        if identity in selected_courses:
+            groups.setdefault(identity, {}).setdefault(_module_variant_label(module), []).append(module)
+
+    rows: list[dict[str, Any]] = []
+    for identity, variants in sorted(groups.items()):
+        if len(variants) < 2 or set(variants) == {"STANDARD"}:
+            continue
+        others = [m for m in selected_modules if _course_identity(m) != identity]
+        first = next(iter(variants.values()))[0]
+        course_label = f"{identity[1]} - {_split_course_variant(first.modulname)[0]}"
+        group_names = _selectable_group_names(sorted(variants))
+        # Sessions without a group suffix next to real groups are common to
+        # all groups: they are part of every group's schedule.
+        common_rows = [m for name, items in variants.items() if name not in group_names for m in items]
+        for variant_name in group_names:
+            group_rows = variants[variant_name] + common_rows
+            group_ids = {id(m) for m in group_rows}
+            collisions: dict[str, int] = {}
+            conflict_sessions = 0
+            for left, right in find_time_conflicts(group_rows + others):
+                if id(left) in group_ids and id(right) not in group_ids:
+                    partner = right
+                elif id(right) in group_ids and id(left) not in group_ids:
+                    partner = left
+                else:
+                    continue
+                conflict_sessions += 1
+                label = _partner_label(partner)
+                collisions[label] = collisions.get(label, 0) + 1
+            collides_with = ", ".join(
+                f"{name} ({count}x)" for name, count in sorted(collisions.items(), key=lambda kv: -kv[1])[:4]
+            )
+            rows.append(
+                {
+                    c("course"): course_label,
+                    c("group"): variant_name.title(),
+                    c("group_selected"): "✓" if any(id(m) in selected_ids for m in group_rows) else "–",
+                    c("group_sessions"): len(group_rows),
+                    c("group_conflicts"): conflict_sessions,
+                    c("group_collides_with"): collides_with or "-",
+                    c("status"): t("conflicts.groups_status_conflict") if conflict_sessions else t("conflicts.groups_status_free"),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _render_group_conflict_overview(selected_modules: List[Any], all_modules: List[Any]) -> None:
+    """Card "Gruppen im Detail" in the conflict tab; renders nothing when no selected course has groups."""
+    overview = _group_conflict_overview(selected_modules, all_modules)
+    if overview.empty:
+        return
+    free_label = t("conflicts.groups_status_free")
+    with card("conflicts-groups", "👥", t("conflicts.groups_title")):
+        st.caption(t("conflicts.groups_caption"))
+        st.dataframe(
+            _style_status_column(
+                overview,
+                c("status"),
+                {free_label: "success", t("conflicts.groups_status_conflict"): "warning"},
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        for course_label, course_rows in overview.groupby(c("course"), sort=False):
+            free_groups = course_rows.loc[course_rows[c("status")] == free_label, c("group")].tolist()
+            if free_groups and len(free_groups) < len(course_rows):
+                st.caption(t("conflicts.groups_free_hint", course=course_label, groups=", ".join(free_groups)))
 
 
 def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | None = None, color_by: str = "module"):
@@ -5517,19 +5642,26 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                         # module key + family key so each component's choice
                         # persists independently across reruns.
                         selector_key = f"variant_multi::{key}::{fam_key}"
+                        # Rows WITHOUT a group suffix ("STANDARD") next to
+                        # real groups (e.g. 2 rows "... Digitalisierung"
+                        # besides "... Gruppe A/B/C") are sessions common to
+                        # all groups: always part of the selection, never
+                        # offered as a group of their own.
+                        group_names = _selectable_group_names(variant_names)
+                        common_variant_names = [v for v in variant_names if v not in group_names]
                         chosen = st.multiselect(
                             t("guided.variant_select_label", family=fam_key),
-                            options=variant_names,
-                            default=variant_names,
+                            options=group_names,
+                            default=group_names,
                             key=selector_key,
                             help=t("guided.variant_select_help"),
                         )
                         for variant_name in variant_names:
-                            if variant_name in chosen:
+                            if variant_name in chosen or variant_name in common_variant_names:
                                 module_selected.extend(variants[variant_name])
                         if not chosen:
                             open_choices += 1
-                        elif len(chosen) == len(variant_names):
+                        elif len(chosen) == len(group_names):
                             undecided_group_components.append(fam_key)
 
                         family_rows.append(
@@ -6596,6 +6728,8 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
             st.success(t("conflicts.none"))
         else:
             st.warning(t("conflicts.none_time_but_absence"))
+
+    _render_group_conflict_overview(selected_modules, all_modules)
 
     if conflicts:
         conflict_summary_df = _summarize_conflicts(conflicts)
