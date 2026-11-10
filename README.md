@@ -38,6 +38,8 @@ Besonders unterstützt werden:
 - Konfliktanalyse-Tab, Karte **"Gruppen im Detail"**: pro Gruppe eines gewählten Kurses, ob sie frei ist oder mit welchen anderen Kursen sie kollidiert (z. B. "AKP10-1 (3x)"), plus Hinweise wie "ohne Konflikt wärst du in Gruppe B". Auch bereits abgewählte Gruppen erscheinen dort, als "Was wäre wenn"-Information.
 - Der Upload meldet Zeilen, die wegen ungültiger Werte (z. B. unvollständige Uhrzeit) nicht importiert werden konnten, mit der Anzahl in der Oberfläche - nicht mehr nur im Server-Log. Eine unbrauchbare Datei (fehlende Pflichtspalten) wird als solche gemeldet und nicht als "unerwarteter Fehler".
 - Der Export ist ohne ausgewählte Module gesperrt (Hinweis statt Export des gesamten Kurskatalogs).
+- **Schnellstart-Karte** (oben): ein Einleitungssatz, die drei Schritte, Dauer/Voraussetzung in einer Zeile und der Hinweis "ersetzt keine Kursanmeldung"; Details zur Kursliste hinter einem "ℹ️ Hilfe"-Button. Die Karte klappt sich nach dem ersten Upload von selbst zu (ausklappbar bleibt sie).
+- Die Auswahltabellen in Schritt 2 zeigen nur noch die für Studierende relevanten Spalten (Modulgruppe, Kurse, Termine, Prüfungen, Zeitraum); der interne "Modul-Key" ist ausgeblendet, die Spalte "Quelle" erscheint nur, wenn eine Zusatzliste hochgeladen wurde.
 - "Quelle"-Spalte in allen Übersichtstabellen zeigt für jede Zeile eindeutig "BSc" oder "MSc" (nie eine leere Zelle)
 - Konfliktanalyse mit:
 	- Paar-Zusammenfassung

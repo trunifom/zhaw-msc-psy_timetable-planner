@@ -4786,6 +4786,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             if module_forced_selection is not None
             else set(st.session_state.get("selected_module_keys", []))
         )
+        show_source_column = bool(st.session_state.get("processed_modules_zusatz"))
         checked_now = _dataframe_row_selection(
             module_df,
             module_row_keys,
@@ -4793,6 +4794,14 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             df_key=f"module_group_selector_df_{module_version}",
             hide_index=True,
             width="stretch",
+            # "Modul-Key" is an internal identifier (e.g. "BASIS::einfül...")
+            # and "Quelle" is always "MSc" without a Zusatz upload - both
+            # only add noise for a student.
+            column_order=[
+                column
+                for column in module_df.columns
+                if column != c("module_key") and (show_source_column or column != c("source"))
+            ],
         )
 
         # Merge rather than overwrite: a key that isn't currently visible in
@@ -5192,6 +5201,11 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             df_key=f"course_group_selector_df_{course_version}",
             hide_index=True,
             width="stretch",
+            column_order=[
+                column
+                for column in df_groups.columns
+                if bool(st.session_state.get("processed_modules_zusatz")) or column != c("source")
+            ],
         )
 
         # Merge rather than overwrite (see "module" mode's identical fix):
@@ -6324,19 +6338,18 @@ def main() -> None:
     # toggle. settings.QUICKSTART_DEFAULT_EXPANDED only picks the state a
     # brand-new session starts in (see that flag's docstring); st.expander is
     # already themed for both light/dark (see _inject_design_system_css()).
-    with st.expander(f"🚀 {t('app.quickstart_title')}", expanded=settings.QUICKSTART_DEFAULT_EXPANDED):
-        st.markdown(t("app.purpose_text"))
-        st.caption(t("app.quickstart_text"))
-        # GOV.UK-style "start page" additions (docs/UX-OPTIMIERUNGEN-
-        # README.md, Zusatzempfehlung A): roughly how long this takes, what
-        # file is needed and where to get it, and an explicit "this is not
-        # a course registration" disclaimer - toggleable via settings.
-        # SHOW_EXTENDED_QUICKSTART (see that flag's docstring) so pilot
-        # feedback can compare against the original, shorter card text.
+    # Expanded for a brand-new visitor, but folds itself away once a file is
+    # loaded - from then on it is only in the way. Visitors can still open
+    # it any time; settings.QUICKSTART_DEFAULT_EXPANDED only decides the
+    # state before the first upload.
+    quickstart_open = settings.QUICKSTART_DEFAULT_EXPANDED and not st.session_state.get("processed_modules")
+    with st.expander(f"🚀 {t('app.quickstart_title')}", expanded=quickstart_open):
+        st.markdown(t("app.purpose_short"))
+        st.markdown(t("app.quickstart_text"))
         if settings.SHOW_EXTENDED_QUICKSTART:
-            st.caption(t("app.quickstart_duration"))
-            st.caption(t("app.quickstart_requirements"))
-            st.info(t("app.quickstart_disclaimer"))
+            st.caption(t("app.quickstart_meta"))
+            st.caption(t("app.quickstart_disclaimer"))
+        _help_popover(t("app.purpose_text") + "\n\n" + t("app.quickstart_requirements"))
 
     # Reserved here (near the top, right under the Quickstart card) but
     # only FILLED further down, once render_guided_planning() has run and
