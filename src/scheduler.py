@@ -79,9 +79,39 @@ def _semantic_signature(module: ZHAWModule) -> tuple:
     )
 
 
+def is_same_course(left: ZHAWModule, right: ZHAWModule) -> bool:
+    """
+    True when two rows belong to the SAME course (same Kurs-Nr within the
+    same Modul-Nr and the same upload origin) - e.g. "Gruppe A" and
+    "Gruppe B" of one course running at the same time, or two sessions of
+    the same course.
+
+    Such rows are alternatives/parts of ONE course and never count as a
+    conflict with each other: a student attends only one group, or - while
+    the group is still undecided - the groups are not competing with
+    themselves. They can of course still conflict with OTHER courses.
+
+    Deliberately conservative: without a Kurs-Nr nothing can be said, so
+    this returns False (the pair is then judged purely by time as before).
+    An exam row vs. a non-exam row of the same course is also not treated
+    as "same course" - an exam overlapping a regular session is a data
+    oddity worth flagging.
+    """
+    left_kurs = str(getattr(left, "kurs_nr", "") or "").strip()
+    right_kurs = str(getattr(right, "kurs_nr", "") or "").strip()
+    if not left_kurs or left_kurs != right_kurs:
+        return False
+    if str(getattr(left, "modul_nr", "") or "").strip() != str(getattr(right, "modul_nr", "") or "").strip():
+        return False
+    if bool(getattr(left, "ist_zusatzmodul", False)) != bool(getattr(right, "ist_zusatzmodul", False)):
+        return False
+    return bool(getattr(left, "ist_pruefung", False)) == bool(getattr(right, "ist_pruefung", False))
+
+
 def find_time_conflicts(modules: Iterable[ZHAWModule]) -> list[tuple[ZHAWModule, ZHAWModule]]:
     """
     Detect overlapping modules (same date, or same weekday if undated).
+    Rows of the SAME course (see is_same_course) are never paired.
 
     This is an O(n^2) pairwise comparison - deliberately simple, since a
     student's selected schedule is at most a few hundred rows, so the
@@ -110,6 +140,8 @@ def find_time_conflicts(modules: Iterable[ZHAWModule]) -> list[tuple[ZHAWModule,
         for right in module_list[i + 1 :]:
             if not _same_occurrence(left, right):
                 continue
+            if is_same_course(left, right):
+                continue  # groups/sessions of one course never conflict with each other
 
             right_signature = _semantic_signature(right)
             if left_signature == right_signature:

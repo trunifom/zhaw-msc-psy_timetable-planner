@@ -85,7 +85,7 @@ if not logger.handlers:
 # st.stop() later in main(). MODULES_AVAILABLE is checked there.
 try:
     from data_loader import load_schedule_from_dataframe, DataLoaderError
-    from scheduler import find_time_conflicts, find_critical_first_session_conflicts
+    from scheduler import find_time_conflicts, find_critical_first_session_conflicts, is_same_course
     from models import ZHAWModule
     from export import prepare_timetable_for_export, generate_excel_download, generate_ics_download
     MODULES_AVAILABLE = True
@@ -2442,7 +2442,7 @@ def _calculate_overlap_rows(modules: List[Any]) -> List[dict]:
     seen_pairs: set[tuple[tuple, tuple]] = set()
     for i, left in enumerate(modules):
         for right in modules[i + 1 :]:
-            if not _same_occurrence_context(left, right):
+            if not _same_occurrence_context(left, right) or is_same_course(left, right):
                 continue
             left_signature = _module_signature(left)
             right_signature = _module_signature(right)
@@ -2508,7 +2508,7 @@ def _calculate_module_overlap_summary(modules: List[Any]) -> pd.DataFrame:
     seen_pairs: set[tuple[tuple, tuple]] = set()
     for i, left in enumerate(modules):
         for right in modules[i + 1 :]:
-            if not _same_occurrence_context(left, right):
+            if not _same_occurrence_context(left, right) or is_same_course(left, right):
                 continue
             left_signature = _module_signature(left)
             right_signature = _module_signature(right)

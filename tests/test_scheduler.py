@@ -218,3 +218,33 @@ def test_bachelor_bachelor_conflict_on_first_session_is_flagged():
     assert len(results) == 1
     assert results[0]["left_session_position"] == 1
     assert results[0]["right_session_position"] == 1
+
+
+def test_groups_of_the_same_course_never_conflict_with_each_other():
+    # Real case (DIG1-2): Gruppe A and Gruppe B run at the same time.
+    a = make_module(modulname="Vertiefung Gruppe A", modul_nr="DIG1", kurs_nr="DIG1-2", datum=date(2026, 10, 5))
+    b = make_module(modulname="Vertiefung Gruppe B", modul_nr="DIG1", kurs_nr="DIG1-2", datum=date(2026, 10, 5))
+    assert find_time_conflicts([a, b]) == []
+
+
+def test_every_selected_group_still_conflicts_with_other_courses():
+    a = make_module(modulname="Vertiefung Gruppe A", modul_nr="DIG1", kurs_nr="DIG1-2", datum=date(2026, 10, 5))
+    b = make_module(modulname="Vertiefung Gruppe B", modul_nr="DIG1", kurs_nr="DIG1-2", datum=date(2026, 10, 5))
+    other = make_module(modulname="Decision-making", modul_nr="AKP10", kurs_nr="AKP10-1", datum=date(2026, 10, 5))
+    conflicts = find_time_conflicts([a, b, other])
+    assert len(conflicts) == 2
+    assert all(other in pair for pair in conflicts)
+
+
+def test_different_courses_of_the_same_module_still_conflict():
+    a = make_module(modulname="Teil 1", modul_nr="DIG1", kurs_nr="DIG1-1", datum=date(2026, 10, 5))
+    b = make_module(modulname="Teil 2", modul_nr="DIG1", kurs_nr="DIG1-2", datum=date(2026, 10, 5))
+    assert len(find_time_conflicts([a, b])) == 1
+
+
+def test_same_kurs_nr_in_different_modules_or_origins_is_not_treated_as_same_course():
+    a = make_module(modulname="Modul A", modul_nr="X1", kurs_nr="K-1", datum=date(2026, 10, 5))
+    b = make_module(modulname="Modul B", modul_nr="X2", kurs_nr="K-1", datum=date(2026, 10, 5))
+    assert len(find_time_conflicts([a, b])) == 1
+    c = make_module(modulname="Modul C", modul_nr="X1", kurs_nr="K-1", datum=date(2026, 10, 5), ist_zusatzmodul=True)
+    assert len(find_time_conflicts([a, c])) == 1
