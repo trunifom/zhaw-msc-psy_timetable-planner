@@ -576,7 +576,11 @@ def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # ==========================================
 # 5. MAIN DATA LOADER LOGIC
 # ==========================================
-def load_schedule_from_dataframe(raw_df: pd.DataFrame, ist_zusatzmodul: bool = False) -> List[ZHAWModule]:
+def load_schedule_from_dataframe(
+    raw_df: pd.DataFrame,
+    ist_zusatzmodul: bool = False,
+    stats: Dict[str, int] | None = None,
+) -> List[ZHAWModule]:
     """
     Main entry point for data ingestion. Takes a raw Pandas DataFrame (uploaded via UI),
     validates its structure, sanitizes the contents, and maps it to strongly-typed
@@ -594,6 +598,11 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame, ist_zusatzmodul: bool = F
             the source file reliably filling that column, which the rest of
             this module's defensive sanitizing philosophy deliberately
             avoids.
+
+        stats: optional out-parameter. If a dict is passed, it is filled with
+            `dropped_rows` (rows rejected by validation - otherwise only
+            visible in the server log) so the UI can tell the student that
+            part of their file was not imported.
 
     Returns:
         List[ZHAWModule]: A list of validated module objects.
@@ -767,6 +776,8 @@ def load_schedule_from_dataframe(raw_df: pd.DataFrame, ist_zusatzmodul: bool = F
         logger.warning(f"Suppressed {suppressed_validation_logs} additional row validation warnings.")
 
     logger.info(f"Successfully loaded {len(processed_modules)} modules. Failed rows: {validation_errors}")
+    if stats is not None:
+        stats["dropped_rows"] = validation_errors
     
     if len(processed_modules) == 0 and len(df) > 0:
         # If all rows failed validation, throw an error to the UI

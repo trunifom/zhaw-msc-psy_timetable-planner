@@ -304,3 +304,22 @@ def test_undistinguished_parallel_offerings_all_load_as_separate_rows(zusatz_fix
     assert len(anw7) == 3
     assert len({m.dozierende for m in anw7}) == 3
     assert len({(m.datum, m.startzeit, m.endzeit) for m in anw7}) == 1
+
+
+def test_stats_out_parameter_reports_dropped_rows():
+    import pandas as pd
+    from data_loader import load_schedule_from_dataframe
+
+    df = pd.DataFrame(
+        {
+            "wochentag": ["Montag", "Dienstag"],
+            "startzeit": ["08:00", "09:00"],
+            "endzeit": ["10:00", "11"],  # second row: unparseable end time
+            "modulname": ["Gueltiges Modul", "Defektes Modul"],
+            "ects": [3, 3],
+        }
+    )
+    stats: dict = {}
+    result = load_schedule_from_dataframe(df, stats=stats)
+    assert len(result) == 1
+    assert stats["dropped_rows"] == 1

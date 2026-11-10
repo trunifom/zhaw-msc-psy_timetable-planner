@@ -1079,7 +1079,10 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
             df = pd.read_csv(uploaded_file)
             st.session_state[raw_data_key] = df
             st.session_state[file_id_key] = uploaded_file.file_id
-            st.session_state[modules_key] = load_schedule_from_dataframe(df, ist_zusatzmodul=ist_zusatzmodul)
+            load_stats: dict = {}
+            st.session_state[modules_key] = load_schedule_from_dataframe(
+                df, ist_zusatzmodul=ist_zusatzmodul, stats=load_stats
+            )
             _recompute_combined_modules()
             st.session_state.selected_modules = []
             st.session_state.selected_module_keys = []
@@ -1094,6 +1097,7 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
             # this fixes at the other three reset sites in this file).
             st.session_state.planning_finalized = False
             st.toast(t("upload.success"), icon="✅")
+            _warn_if_rows_dropped(load_stats)
             _warn_if_dates_missing(st.session_state[modules_key])
             return
         elif uploaded_file.name.endswith(('.xls', '.xlsx')):
@@ -1109,7 +1113,10 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
                     continue
 
                 try:
-                    processed_modules = load_schedule_from_dataframe(candidate_df, ist_zusatzmodul=ist_zusatzmodul)
+                    load_stats = {}
+                    processed_modules = load_schedule_from_dataframe(
+                        candidate_df, ist_zusatzmodul=ist_zusatzmodul, stats=load_stats
+                    )
                 except Exception as err:
                     # This sheet didn't contain a valid schedule (e.g. it's a
                     # notes/legend sheet) - remember the error in case ALL
@@ -1135,6 +1142,7 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
                 # is needed here too.
                 st.session_state.planning_finalized = False
                 st.toast(t("upload.success_sheet", sheet_name=sheet_name), icon="✅")
+                _warn_if_rows_dropped(load_stats)
                 _warn_if_dates_missing(st.session_state[modules_key])
                 return
 
@@ -1186,6 +1194,13 @@ def handle_file_upload(uploaded_file: Any, ist_zusatzmodul: bool = False) -> Non
         # it - the short message shown in the UI alone rarely does.
         logger.exception("Unexpected error while processing an uploaded file.")
         st.error(t("upload.unexpected_error", error=_format_user_facing_error(e)))
+
+
+def _warn_if_rows_dropped(stats: dict) -> None:
+    """Tell the student when rows of their file failed validation and were not imported."""
+    dropped = int(stats.get("dropped_rows", 0) or 0)
+    if dropped:
+        st.warning(t("upload.rows_dropped", count=dropped))
 
 
 def _warn_if_dates_missing(modules: List) -> None:
