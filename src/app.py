@@ -303,8 +303,14 @@ THEME_TOKENS: dict[str, dict[str, str]] = {
 # black chart surface, so they're lightened for dark mode specifically
 # (re-validated against that surface) rather than reused as-is; Koralle,
 # Ozean and Eukalyptus already passed unchanged.
+# The first five are the ZHAW CI colors. Only 5 used to be defined, so with
+# more than 5 selected courses colors repeated (two different courses in the
+# same color on the semester grid/charts). 7 more, mutually distinguishable
+# hues follow; deliberately no grey (reserved for "not selected").
+_EXTRA_DISTINCT_COLORS = ["#E8832A", "#C9A400", "#56B4E9", "#8C564B", "#6B7A00", "#D95FA6", "#4B4B8F"]
+
 CHART_PALETTES_LIGHT: dict[str, list[str]] = {
-    "default": ["#0064A6", "#E62154", "#00919B", "#8A249E", "#00795D"],
+    "default": ["#0064A6", "#E62154", "#00919B", "#8A249E", "#00795D", *_EXTRA_DISTINCT_COLORS],
     "pastel": px.colors.qualitative.Pastel,
     "vivid": px.colors.qualitative.Vivid,
     "colorblind_safe": px.colors.qualitative.Safe,
@@ -312,7 +318,7 @@ CHART_PALETTES_LIGHT: dict[str, list[str]] = {
 }
 CHART_PALETTES_DARK: dict[str, list[str]] = {
     **CHART_PALETTES_LIGHT,
-    "default": ["#3383b8", "#E62154", "#00919B", "#9c45ad", "#00795D"],
+    "default": ["#3383b8", "#E62154", "#00919B", "#9c45ad", "#00795D", *_EXTRA_DISTINCT_COLORS],
 }
 
 
@@ -978,9 +984,6 @@ def _apply_chart_theme(fig):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font_color=theme["text"],
-        # Plotly's own title font does not inherit font_color when the title
-        # is set via px's `title=` - was dark-on-dark in the dark theme.
-        title_font_color=theme["text"],
         legend=dict(font_color=theme["text"]),
         xaxis=dict(gridcolor=theme["border"], zerolinecolor=theme["border"], linecolor=theme["border"]),
         yaxis=dict(gridcolor=theme["border"], zerolinecolor=theme["border"], linecolor=theme["border"]),
@@ -991,6 +994,17 @@ def _apply_chart_theme(fig):
         # this is what actually makes that true).
         hoverlabel=dict(bgcolor=theme["surface"], font_color=theme["text"], bordercolor=theme["border"]),
     )
+    # Plotly's own title font does not inherit font_color when the title is
+    # set via px's `title=` (dark-on-dark in the dark theme). Only touch it
+    # when a title actually exists: setting title_font_* on a figure WITHOUT
+    # a title makes Plotly.js render a literal "undefined" heading.
+    if fig.layout.title.text:
+        fig.update_layout(title_font_color=theme["text"])
+    # Internal grouping columns (e.g. "_legend_label") must never surface as
+    # a legend heading - Plotly Express uses the column name as legend title.
+    legend_title = (fig.layout.legend.title.text or "") if fig.layout.legend.title else ""
+    if legend_title.startswith("_"):
+        fig.update_layout(legend_title_text=c("module"))
     return fig
 
 

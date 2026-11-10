@@ -1040,3 +1040,29 @@ def test_apply_chart_theme_colors_title_with_theme_text_color(monkeypatch):
         fig = px.bar(x=[1, 2], y=[3, 4], title="Titel")
         themed = app._apply_chart_theme(fig)
         assert themed.layout.title.font.color == app.THEME_TOKENS[theme_name]["text"]
+
+
+def test_default_palette_has_enough_distinct_colors_for_many_courses():
+    for palette in (app.CHART_PALETTES_LIGHT["default"], app.CHART_PALETTES_DARK["default"]):
+        assert len(palette) >= 12
+        assert len({color.lower() for color in palette}) == len(palette)
+        assert "#b5bac6" not in {color.lower() for color in palette}  # grey = "not selected"
+
+
+def test_apply_chart_theme_hides_internal_legend_title():
+    import plotly.express as px
+    import pandas as pd
+
+    df = pd.DataFrame({"x": [1, 2], "y": [1, 2], "_legend_label": ["a", "b"]})
+    fig = app._apply_chart_theme(px.scatter(df, x="x", y="y", color="_legend_label"))
+    assert not (fig.layout.legend.title.text or "").startswith("_")
+
+
+def test_apply_chart_theme_does_not_create_a_title_for_untitled_figures():
+    """Regression: setting title_font_color on an untitled figure made
+    Plotly.js render a literal 'undefined' heading."""
+    import plotly.express as px
+
+    fig = app._apply_chart_theme(px.scatter(x=[1, 2], y=[1, 2]))
+    assert fig.layout.title.font.color is None
+    assert not fig.layout.title.text
