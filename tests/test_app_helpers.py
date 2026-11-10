@@ -1156,3 +1156,15 @@ def test_short_code_with_group_marks_parallel_groups_on_chart_bars():
     assert " " not in app._short_code_with_group(akp)
     half = make_module(modulname="Grundlagen Halbklasse 2", modul_nr="IN1", kurs_nr="IN1-1")
     assert app._short_code_with_group(half).endswith(" HK2")
+
+
+def test_conflict_pair_sentences_groups_dates_per_course_pair_and_keeps_groups_apart():
+    a1 = make_module(modulname="Kurs Alpha Gruppe A", modul_nr="AL1", kurs_nr="AL1-1", datum=date(2026, 10, 5))
+    a2 = make_module(modulname="Kurs Alpha Gruppe A", modul_nr="AL1", kurs_nr="AL1-1", datum=date(2026, 10, 12))
+    b1 = make_module(modulname="Kurs Beta", modul_nr="BE1", kurs_nr="BE1-1", datum=date(2026, 10, 5))
+    b2 = make_module(modulname="Kurs Beta", modul_nr="BE1", kurs_nr="BE1-1", datum=date(2026, 10, 12))
+    sentences = app._conflict_pair_sentences([(a1, b1), (a2, b2)])
+    assert len(sentences) == 1
+    assert sentences[0]["count"] == 2
+    assert "Gruppe A" in sentences[0]["a"] + sentences[0]["b"]
+    assert app._conflict_pair_sentences([]) == []

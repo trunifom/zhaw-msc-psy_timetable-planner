@@ -2796,6 +2796,31 @@ def _render_group_conflict_overview(selected_modules: List[Any], all_modules: Li
                 st.caption(t("conflicts.groups_free_hint", course=course_label, groups=", ".join(free_groups)))
 
 
+def _conflict_pair_sentences(conflicts: List[Tuple[Any, Any]]) -> list[dict[str, Any]]:
+    """
+    One entry per unordered pair of courses that collide, for the plain-
+    language list in the conflict tab: short labels (course code + short
+    title, group suffix kept so "Gruppe A" vs "Gruppe B" stay distinct),
+    number of colliding dates and up to 4 example dates. Sorted by number
+    of colliding dates, most affected pair first.
+    """
+
+    def _short(module: Any) -> str:
+        label = _module_legend_label(module)
+        return f"🎓 {label}" if getattr(module, "ist_zusatzmodul", False) else label
+
+    pairs: dict[tuple[str, str], dict[str, Any]] = {}
+    for left, right in conflicts:
+        names = sorted([_short(left), _short(right)])
+        entry = pairs.setdefault((names[0], names[1]), {"a": names[0], "b": names[1], "dates": set()})
+        entry["dates"].add(_conflict_date_label(left))
+    result = []
+    for entry in pairs.values():
+        dates = sorted(entry["dates"])
+        result.append({"a": entry["a"], "b": entry["b"], "count": len(dates), "dates": ", ".join(dates[:4])})
+    return sorted(result, key=lambda e: (-e["count"], e["a"]))
+
+
 def _semester_timeline_figure(modules: List[Any], color_sequence: list[str] | None = None, color_by: str = "module"):
     """
     Build a Plotly scatter timeline spanning the whole semester: one marker
@@ -6787,10 +6812,7 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
         else:
             st.warning(t("conflicts.none_time_but_absence"))
 
-    _render_group_conflict_overview(selected_modules, all_modules)
-
     if conflicts:
-        conflict_summary_df = _summarize_conflicts(conflicts)
         conflict_rows = []
         for left, right in conflicts:
             overlap = _minutes_overlap(left, right)
@@ -6857,69 +6879,40 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
                 )
             )
 
-        with card("conflicts-summary", "📊", t("conflicts.summary_title").strip("*")):
-            if not conflict_summary_df.empty:
-                st.dataframe(
-                    conflict_summary_df,
-                    hide_index=True,
-                    width="stretch",
-                    column_config={
-                        c("overlap_total_min"): st.column_config.NumberColumn(c("overlap_total_min"), format="%d min"),
-                        c("conflict_days_count"): st.column_config.NumberColumn(c("conflict_days_count"), width="small"),
-                    },
+        # One plain sentence per course pair first - what a student actually
+        # needs ("which two can't I both attend, and when?") - instead of a
+        # wide technical table plus three charts (bar/pie/by-date) whose
+        # minute totals didn't answer any decision.
+        with card("conflicts-plain", "📊", t("conflicts.plain_title")):
+            st.caption(t("conflicts.plain_caption"))
+            pair_sentences = _conflict_pair_sentences(conflicts)
+            shown_pairs = 10
+            for pair in pair_sentences[:shown_pairs]:
+                st.markdown(
+                    "- "
+                    + t(
+                        "conflicts.plain_line_one" if pair["count"] == 1 else "conflicts.plain_line",
+                        a=pair["a"],
+                        b=pair["b"],
+                        count=pair["count"],
+                        dates=pair["dates"],
+                    )
                 )
+            if len(pair_sentences) > shown_pairs:
+                st.caption(t("conflicts.plain_more", count=len(pair_sentences) - shown_pairs))
 
-            if not conflict_df.empty:
-                top_conflicts = conflict_df.head(8).copy()
-                fig = px.bar(
-                    top_conflicts,
-                    x=c("overlap_min"),
-                    y="_module_1_chart_label",
-                    color="_module_2_chart_label",
-                    orientation="h",
-                    title=t("chart.conflict_top"),
-                    hover_name=c("module_1"),
-                    hover_data={c("module_2"): True},
-                )
-                fig.update_layout(
-                    height=max(420, 44 * len(top_conflicts) + 120),
-                    margin=dict(l=10, r=10, t=40, b=10),
-                    # Without this, Plotly would show the internal
-                    # "_module_1_chart_label"/"_module_2_chart_label" column
-                    # names themselves as the axis/legend titles, since
-                    # those (unlike every `c(...)`-named column) were never
-                    # routed through i18n - see their construction above for
-                    # why they're internal, chart-only columns in the first
-                    # place.
-                    yaxis_title="",
-                    legend_title_text=t("chart.legend_modules"),
-                )
-                st.plotly_chart(_apply_chart_theme(fig), use_container_width=True)
-                # top_conflicts is always capped at 8 rows (see .head(8)
-                # above) so the bar chart stays readable - but a silent cap
-                # looks like "these are all the conflicts" to someone who
-                # doesn't know the code. Only surfaced when the cap actually
-                # cut something, so the common case (<=8 conflicts) stays
-                # caption-free.
-                if len(conflict_df) > len(top_conflicts):
-                    st.caption(t("chart.conflict_top_truncated", shown=len(top_conflicts), total=len(conflict_df)))
-
-                by_day = conflict_df.groupby(c("weekday"), as_index=False)[c("overlap_min")].sum()
-                fig_day = px.pie(by_day, values=c("overlap_min"), names=c("weekday"), title=t("conflicts.chart.by_weekday"))
-                fig_day.update_layout(height=360, margin=dict(l=10, r=10, t=40, b=10))
-                st.plotly_chart(_apply_chart_theme(fig_day), use_container_width=True)
-
-                by_date = conflict_df.groupby(c("date"), as_index=False)[c("overlap_min")].sum()
-                fig_date = px.bar(by_date, x=c("date"), y=c("overlap_min"), title=t("conflicts.chart.by_date"))
-                fig_date.update_layout(height=340, margin=dict(l=10, r=10, t=40, b=10))
-                st.plotly_chart(_apply_chart_theme(fig_date), use_container_width=True)
-
-        with card("conflicts-details", "🔬", t("conflicts.details_title").strip("*")):
-            # Drop the chart-only short-label columns added above (see the
-            # comment at `_module_1_chart_label`'s construction) - this
-            # table shows the full, untruncated module names instead.
+        # Full per-session table, collapsed by default. The two percentage
+        # columns (overlap as % of each module's duration) are dropped: they
+        # explained little to students and doubled the table's width.
+        with st.expander(t("conflicts.details_expander", count=len(conflict_df)), expanded=False):
             conflict_table_df = conflict_df.drop(
-                columns=["_module_1_chart_label", "_module_2_chart_label"], errors="ignore"
+                columns=[
+                    "_module_1_chart_label",
+                    "_module_2_chart_label",
+                    c("overlap_pct_module_1"),
+                    c("overlap_pct_module_2"),
+                ],
+                errors="ignore",
             )
             st.dataframe(
                 _style_sequential_red(conflict_table_df, c("overlap_min")),
@@ -6927,12 +6920,10 @@ def render_conflict_analysis(conflicts: List[Tuple], selected_modules: List[Any]
                 width="stretch",
                 column_config={
                     c("overlap_min"): st.column_config.NumberColumn(c("overlap_min"), format="%d min"),
-                    c("overlap_pct_module_1"): st.column_config.NumberColumn(c("overlap_pct_module_1"), format="%.1f %%"),
-                    c("overlap_pct_module_2"): st.column_config.NumberColumn(c("overlap_pct_module_2"), format="%.1f %%"),
                 },
             )
-            st.markdown(t("conflicts.interpretation_title"))
-            st.caption(t("conflicts.interpretation_text"))
+
+    _render_group_conflict_overview(selected_modules, all_modules)
 
     # Passerelle-specific detail table - only shown when a Zusatzmodule
     # (Bachelor) upload exists at all. Computed independently of `conflicts`
