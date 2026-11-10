@@ -4059,6 +4059,160 @@ def _weekly_timeline_lanes_figure(modules: List[Any], color_mode: str = "multi",
     return _apply_chart_theme(fig)
 
 
+def _calendar_weeks(modules: List[Any]) -> list[tuple[date, str, int]]:
+    """(monday, label "KW 40 (28.09.)", number of sessions) per calendar week
+    that has dated sessions, in chronological order (HS spans the year end, so
+    ordering is by the real Monday date, not the ISO week number)."""
+    counts: dict[date, int] = {}
+    for module in modules:
+        datum_value = getattr(module, "datum", None)
+        if datum_value is not None:
+            monday = datum_value - timedelta(days=datum_value.weekday())
+            counts[monday] = counts.get(monday, 0) + 1
+    return [
+        (monday, f"KW {monday.isocalendar().week} ({monday.strftime('%d.%m.')})", counts[monday])
+        for monday in sorted(counts)
+    ]
+
+
+def _modules_in_week(modules: List[Any], monday: date) -> list[Any]:
+    """Sessions dated within the week starting at `monday`; undated rows
+    (recurring, no date) are kept because they apply to every week."""
+    sunday = monday + timedelta(days=6)
+    return [m for m in modules if getattr(m, "datum", None) is None or monday <= m.datum <= sunday]
+
+
+def _weekly_grid_figure(modules: List[Any], color_sequence: list[str] | None = None):
+    """
+    The classic timetable grid students know from printed Stundenplaene:
+    one COLUMN per weekday (Mon-Fri always, Sat/Sun only when something
+    takes place), time of day running DOWN the page, one block per
+    (weekday, time, course) slot of the typical week. Overlapping blocks on
+    the same day sit side by side in equal-width lanes (same lane packing as
+    the calendar convention in _assign_weekday_lanes) instead of covering
+    each other. Exams are hatched; blocked half-days from the absence rules
+    are drawn as grey areas. Built with go.Bar (numeric x positions) so the
+    lane offsets can be computed by hand.
+    """
+    if not modules:
+        return None
+
+    day_labels = _weekday_labels_in_order()
+    slots_by_day: dict[str, list[dict]] = {day: [] for day in day_labels}
+    for slot in _weekly_timeline_slots(modules):
+        if slot["weekday"] in slots_by_day:
+            slots_by_day[slot["weekday"]].append(dict(slot))
+
+    overlay_df = _absence_overlay_for_week(_absence_settings())
+    if not overlay_df.empty:
+        for _, overlay_row in overlay_df.iterrows():
+            day = overlay_row[c("weekday")]
+            if day in slots_by_day:
+                slots_by_day[day].append(
+                    {
+                        "weekday": day,
+                        "label": overlay_row[c("module")],
+                        "short_label": overlay_row[c("module")],
+                        "start": overlay_row[c("start")].strftime("%H:%M:%S"),
+                        "end": overlay_row[c("end")].strftime("%H:%M:%S"),
+                        "exam": False,
+                        "_overlay": True,
+                        c("occurrences"): 1,
+                        c("period"): "",
+                    }
+                )
+
+    shown_days = [day for index, day in enumerate(day_labels) if index < 5 or slots_by_day[day]]
+    if not any(slots_by_day[day] for day in shown_days):
+        return None
+
+    def _minutes(hhmmss: str) -> int:
+        hours, minutes, _seconds = (int(part) for part in hhmmss.split(":"))
+        return hours * 60 + minutes
+
+    theme = THEME_TOKENS.get(st.session_state.get("ui_theme", "light"), THEME_TOKENS["light"])
+    palette = color_sequence or _chart_palettes()["default"]
+    palette_lookup: dict[str, str] = {}
+    fig = go.Figure()
+    seen_legend: set[str] = set()
+    earliest, latest = 24 * 60, 0
+
+    for day_index, day in enumerate(shown_days):
+        day_slots = slots_by_day[day]
+        lanes = _assign_weekday_lanes(day_slots) if day_slots else 1
+        lane_width = 0.92 / lanes
+        for slot in day_slots:
+            start_min, end_min = _minutes(slot["start"]), _minutes(slot["end"])
+            earliest, latest = min(earliest, start_min), max(latest, end_min)
+            is_overlay = bool(slot.get("_overlay"))
+            if is_overlay:
+                color_key = slot["label"]
+                color = "rgba(128,128,128,0.35)"
+            else:
+                color_key = _truncate_text(slot["label"])
+                if color_key not in palette_lookup:
+                    palette_lookup[color_key] = palette[len(palette_lookup) % len(palette)]
+                color = palette_lookup[color_key]
+            show_legend = color_key not in seen_legend
+            seen_legend.add(color_key)
+            center_x = day_index - 0.46 + (slot.get("lane", 0) + 0.5) * lane_width
+            hover = [
+                f"<b>{slot['label']}</b>",
+                f"{day}, {slot['start'][:5]}-{slot['end'][:5]}",
+            ]
+            if not is_overlay:
+                hover.append(f"{c('occurrences')}: {slot.get(c('occurrences'), len(slot.get('dates', [])) or 1)}")
+            fig.add_trace(
+                go.Bar(
+                    x=[center_x],
+                    y=[end_min - start_min],
+                    base=[start_min],
+                    width=[lane_width * 0.96],
+                    marker=dict(
+                        color=color,
+                        line=dict(color=theme["surface"], width=1),
+                        pattern=dict(shape="/" if slot["exam"] else ""),
+                    ),
+                    name=color_key,
+                    legendgroup=color_key,
+                    showlegend=show_legend,
+                    text=slot["short_label"],
+                    textposition="inside",
+                    insidetextanchor="start",
+                    textangle=0,
+                    textfont=dict(size=11, color="white" if not is_overlay else theme["text"]),
+                    hovertemplate="<br>".join(hover) + "<extra></extra>",
+                )
+            )
+
+    first_hour = (earliest // 60) * 60
+    last_hour = ((latest + 59) // 60) * 60
+    hour_ticks = list(range(first_hour, last_hour + 1, 60))
+    fig.update_xaxes(
+        tickmode="array",
+        tickvals=list(range(len(shown_days))),
+        ticktext=shown_days,
+        range=[-0.5, len(shown_days) - 0.5],
+        side="top",
+        showgrid=False,
+        tickfont=dict(size=13),
+    )
+    fig.update_yaxes(
+        tickmode="array",
+        tickvals=hour_ticks,
+        ticktext=[f"{minute // 60:02d}:00" for minute in hour_ticks],
+        range=[last_hour + 15, first_hour - 15],  # reversed: earliest on top
+    )
+    fig.update_layout(
+        barmode="overlay",
+        height=max(520, int((last_hour - first_hour) / 60 * 62) + 120),
+        margin=dict(l=10, r=10, t=40, b=10),
+        legend=dict(orientation="h", yanchor="top", y=-0.02, xanchor="left", x=0, entrywidth=170, entrywidthmode="pixels"),
+        legend_title_text=t("chart.legend_modules"),
+    )
+    return _apply_chart_theme(fig)
+
+
 def _weekday_bar_figure(modules: List[Any], color_sequence: list[str] | None = None):
     """Simple histogram of row counts per weekday (relying on px.bar's
     implicit count-of-occurrences when no y is given), in Monday-first
@@ -6485,42 +6639,25 @@ def render_timetable(modules: List) -> None:
     with card("timetable-chart", "🗓️", t("timetable.section.chart")):
         st.caption(t("timetable.caption"))
 
-        # Same "🎨 Diagramm-Einstellungen" toolbar pattern the Dashboard
-        # charts already use (weekday filter + an extra chart-specific
-        # choice) - this chart previously had none at all, with a fixed,
-        # non-configurable "color by module type" scheme. `extra_options`
-        # adds the "Einfarbig"/"Mehrfarbig" choice; weekday filtering lets
-        # a student temporarily hide days they don't care about right now.
-        # filtered_modules feeds both the stat row below and the chart
-        # itself, so the two always agree on what's currently shown.
-        filtered_modules, palette, extra_choices = _render_chart_toolbar(
-            "timetable_chart",
-            modules,
-            show_weekday_filter=True,
-            extra_options={
-                "color_mode": [
-                    (t("chart.color_mode_multi"), "multi"),
-                    (t("chart.color_mode_single"), "single"),
-                ],
-                # "lanes" is the new side-by-side calendar-style layout for
-                # overlapping sessions (docs/UX-OPTIMIERUNGEN-README.md
-                # Punkt 2); "stacked" is the original _weekly_timeline_figure()
-                # view, kept available side by side at the user's explicit
-                # request for comparison before any decision to remove it.
-                "layout_mode": [
-                    (t("chart.layout_mode_stacked"), "stacked"),
-                    (t("chart.layout_mode_lanes"), "lanes"),
-                ],
-            },
-        )
-        color_mode = extra_choices.get("color_mode", "multi")
-        layout_mode = extra_choices.get("layout_mode", "stacked")
+        # One view only: the classic weekday-columns grid. (The previous
+        # palette/weekday-filter panel and the "stacked vs. lanes" choice
+        # were removed - lanes is now simply how overlaps are drawn.)
+        filtered_modules = modules
+        weeks = _calendar_weeks(modules)
+        if weeks:
+            busiest_label = max(weeks, key=lambda week: week[2])[1]
+            all_weeks_label = t("timetable.week_all")
+            week_labels = [label for _, label, _ in weeks]
+            chosen_week = st.selectbox(
+                t("timetable.week_label"),
+                options=[all_weeks_label] + week_labels,
+                index=1 + week_labels.index(busiest_label),  # start with the busiest real week
+                key="timetable_week",
+            )
+            if chosen_week != all_weeks_label and chosen_week in week_labels:
+                filtered_modules = _modules_in_week(modules, weeks[week_labels.index(chosen_week)][0])
 
-        # "At a glance" stat row, computed from the same slot aggregation
-        # the chart itself uses (_weekly_timeline_slots) - answers "how
-        # busy is a typical week" in three numbers before the student has
-        # to read the chart at all, per the "what must they understand in
-        # 5 seconds" dashboard-design principle.
+        # "At a glance" numbers from the same slot aggregation the grid uses.
         slots = _weekly_timeline_slots(filtered_modules)
         if slots:
             weekday_counts: dict[str, int] = {}
@@ -6543,12 +6680,14 @@ def render_timetable(modules: List) -> None:
                 )
             _render_undecided_groups_note(filtered_modules)
 
-        if layout_mode == "lanes":
-            fig = _weekly_timeline_lanes_figure(filtered_modules, color_mode=color_mode, color_sequence=palette)
-        else:
-            fig = _weekly_timeline_figure(filtered_modules, color_mode=color_mode, color_sequence=palette)
+        fig = _weekly_grid_figure(filtered_modules, color_sequence=_chart_palettes()["default"])
         if fig is not None:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"toImageButtonOptions": {"format": "png", "filename": "stundenplan", "scale": 2}},
+            )
+            st.caption(t("timetable.save_hint"))
         else:
             st.info(t("dashboard.chart.no_data"))
 
@@ -6557,7 +6696,7 @@ def render_timetable(modules: List) -> None:
         blocked_days = settings.get("blocked_days", set()) if settings.get("blocked_enabled") else set()
         day_order = _weekday_labels_in_order()
         for day in day_order:
-            daily_mods = sorted([m for m in modules if _weekday_label(m) == day], key=lambda x: x.startzeit)
+            daily_mods = sorted([m for m in filtered_modules if _weekday_label(m) == day], key=lambda x: x.startzeit)
             day_key = _weekday_keys_in_order()[day_order.index(day)]
             day_blocked = day_key in blocked_days
             if not daily_mods and not day_blocked:

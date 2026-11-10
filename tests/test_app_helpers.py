@@ -1179,3 +1179,33 @@ def test_weekday_bar_figure_is_aggregated_one_bar_per_weekday():
     fig = app._weekday_bar_figure(mods, color_sequence=["#0064A6"])
     assert len(fig.data) == 1
     assert list(fig.data[0].y) == [2, 1, 0, 0, 0]
+
+
+def test_calendar_weeks_are_ordered_by_real_date_across_the_year_end():
+    mods = [
+        make_module(modulname="Spaet", datum=date(2027, 1, 18)),
+        make_module(modulname="Frueh Eins", datum=date(2026, 9, 14)),
+        make_module(modulname="Frueh Zwei", datum=date(2026, 9, 16)),
+    ]
+    weeks = app._calendar_weeks(mods)
+    assert [w[0] for w in weeks] == [date(2026, 9, 14), date(2027, 1, 18)]
+    assert [w[2] for w in weeks] == [2, 1]
+    assert weeks[0][1].startswith("KW 38")
+
+
+def test_modules_in_week_keeps_undated_rows_and_drops_other_weeks():
+    in_week = make_module(modulname="Diese Woche", datum=date(2026, 9, 16))
+    other = make_module(modulname="Andere Woche", datum=date(2026, 9, 23))
+    undated = make_module(modulname="Ohne Datum")
+    result = app._modules_in_week([in_week, other, undated], date(2026, 9, 14))
+    assert in_week in result and undated in result and other not in result
+
+
+def test_weekly_grid_figure_places_overlapping_blocks_side_by_side():
+    a = make_module(modulname="Kurs Alpha", modul_nr="A1", kurs_nr="A1-1")
+    b = make_module(modulname="Kurs Beta", modul_nr="B1", kurs_nr="B1-1", startzeit="09:00", endzeit="11:00")
+    fig = app._weekly_grid_figure([a, b], color_sequence=["#0064A6", "#E62154"])
+    assert len(fig.data) == 2
+    x_positions = {round(trace.x[0], 3) for trace in fig.data}
+    assert len(x_positions) == 2  # two lanes, not stacked on the same x
+    assert app._weekly_grid_figure([], color_sequence=None) is None
