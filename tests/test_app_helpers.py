@@ -1015,3 +1015,17 @@ def test_export_section_without_selection_shows_info_and_never_exports_everythin
     app.render_export_section([])
 
     assert infos == [app.t("export.no_selection")]
+
+
+def test_semester_grid_draws_unselected_grey_trace_first_so_selection_stays_visible():
+    """Regression: a grey 'not selected' trace drawn AFTER the colored ones
+    covered selected sessions that share its week/weekday cell."""
+    other = make_module(modulname="Anderes Modul", modul_nr="X1", datum=date(2026, 9, 14))
+    mine = make_module(modulname="Mein Modul", modul_nr="M1", datum=date(2026, 9, 14))
+    # `other` deliberately listed FIRST in the data, `mine` second.
+    fig, _, _ = app._semester_grid_figure([other, mine], [mine])
+    names = [trace.name for trace in fig.data]
+    unselected = app.t("guided.step3_preview_unselected_legend")
+    assert unselected in names
+    assert names[0] == unselected
+    assert len(names) == 2

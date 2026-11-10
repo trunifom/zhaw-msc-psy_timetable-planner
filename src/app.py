@@ -3186,6 +3186,16 @@ def _semester_grid_figure(all_modules: List[Any], selected_modules: List[Any], c
         custom_data=["_is_exam", "_is_conflict", "_is_selected"],
         category_orders={c("weekday"): present_weekdays, c("week"): ordered_weeks},
     )
+    # Draw order = trace order. px.scatter orders traces by first appearance
+    # in the data, so an unselected (grey) trace that happens to come first
+    # in `all_modules`; a grey trace that comes later is drawn ON TOP of the
+    # selected sessions sharing the same week/weekday cell - hiding most of the student's own selection behind grey dots (seen
+    # live with real data: 52 selected sessions, ~3 visible). Force grey to
+    # the bottom, and keep it last in the legend via legendrank.
+    fig.data = tuple(sorted(fig.data, key=lambda trace: trace.name != unselected_label))
+    for trace in fig.data:
+        if trace.name == unselected_label:
+            trace.legendrank = 2000
     fig.update_traces(
         marker=dict(size=34, opacity=0.9, line=dict(width=1, color="rgba(255,255,255,0.6)")),
         textposition="middle center",
