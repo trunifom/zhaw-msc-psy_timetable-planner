@@ -1137,3 +1137,22 @@ def test_group_overview_counts_common_sessions_in_every_group_and_hides_standard
     assert set(overview[app.c("group")]) == {"Gruppe A", "Gruppe B"}  # no "Standard" row
     # the common session collides with AKP10 -> BOTH groups are in conflict now
     assert set(overview[app.c("status")]) == {app.t("conflicts.groups_status_conflict")}
+
+
+def test_undecided_group_courses_flags_only_courses_with_all_groups_selected():
+    ga, gb, akp = _group_scenario()
+    everything = [ga, gb, akp]
+    assert app._undecided_group_courses([ga, gb, akp], everything) == ["DIG1-2"]
+    # student narrowed down to Gruppe B -> decided
+    assert app._undecided_group_courses([gb, akp], everything) == []
+    # single-group course never counts as undecided
+    assert app._undecided_group_courses([akp], everything) == []
+
+
+def test_short_code_with_group_marks_parallel_groups_on_chart_bars():
+    ga, gb, akp = _group_scenario()
+    assert app._short_code_with_group(ga).endswith(" A")
+    assert app._short_code_with_group(gb).endswith(" B")
+    assert " " not in app._short_code_with_group(akp)
+    half = make_module(modulname="Grundlagen Halbklasse 2", modul_nr="IN1", kurs_nr="IN1-1")
+    assert app._short_code_with_group(half).endswith(" HK2")

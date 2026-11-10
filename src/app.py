@@ -1319,6 +1319,9 @@ def render_export_section(modules: List) -> None:
                 help=t("export.download_ics_help"),
             )
 
+            undecided_courses = _undecided_group_courses(modules, st.session_state.get("processed_modules") or [])
+            if undecided_courses:
+                st.warning(t("export.groups_undecided_warning", courses=", ".join(undecided_courses)))
             modules_without_date = sum(1 for m in modules if getattr(m, "datum", None) is None)
             st.caption(t("export.ics_summary", count=len(modules)))
             if modules_without_date:
@@ -2660,6 +2663,46 @@ def _partner_label(module: Any) -> str:
     return f"{kurs_nr} {variant.title()}".strip() if variant else kurs_nr
 
 
+def _selected_course_variants(
+    selected_modules: List[Any], all_modules: List[Any]
+) -> dict[tuple[str, str, bool], dict[str, list[Any]]]:
+    """
+    For every course (see _course_identity) that has at least one non-exam
+    row in the selection: ALL its non-exam rows from `all_modules`, grouped
+    by variant label (e.g. "GRUPPE A"). Courses without a Kurs-Nr are
+    skipped (they cannot be told apart reliably).
+    """
+
+    def _is_candidate(module: Any) -> bool:
+        return bool(_course_identity(module)[1]) and not _is_exam_row(module)
+
+    selected_courses = {_course_identity(m) for m in selected_modules if _is_candidate(m)}
+    groups: dict[tuple[str, str, bool], dict[str, list[Any]]] = {}
+    for module in all_modules:
+        if _is_candidate(module) and _course_identity(module) in selected_courses:
+            groups.setdefault(_course_identity(module), {}).setdefault(_module_variant_label(module), []).append(module)
+    return groups
+
+
+def _undecided_group_courses(selected_modules: List[Any], all_modules: List[Any]) -> list[str]:
+    """
+    Kurs-Nr of every selected course that is offered in 2+ groups while the
+    student has ALL of those groups selected, i.e. has not (yet) narrowed
+    down to their own group. Their sessions are all part of the selection,
+    so weekly hours/busiest-day figures and the export include every group
+    although only one is attended in reality.
+    """
+    selected_ids = {id(m) for m in selected_modules}
+    result: list[str] = []
+    for identity, variants in sorted(_selected_course_variants(selected_modules, all_modules).items()):
+        group_names = _selectable_group_names(sorted(variants))
+        if len(group_names) < 2 or set(group_names) == {"STANDARD"}:
+            continue
+        if all(any(id(m) in selected_ids for m in variants[name]) for name in group_names):
+            result.append(identity[1])
+    return result
+
+
 def _group_conflict_overview(selected_modules: List[Any], all_modules: List[Any]) -> pd.DataFrame:
     """
     One row per GROUP (e.g. "GRUPPE A") of every selected course that is
@@ -2677,19 +2720,8 @@ def _group_conflict_overview(selected_modules: List[Any], all_modules: List[Any]
     Returns an empty DataFrame when no selected course has 2+ groups.
     """
 
-    def _is_group_candidate(module: Any) -> bool:
-        return bool(_course_identity(module)[1]) and not _is_exam_row(module)
-
-    selected_courses = {_course_identity(m) for m in selected_modules if _is_group_candidate(m)}
     selected_ids = {id(m) for m in selected_modules}
-
-    groups: dict[tuple[str, str, bool], dict[str, list[Any]]] = {}
-    for module in all_modules:
-        if not _is_group_candidate(module):
-            continue
-        identity = _course_identity(module)
-        if identity in selected_courses:
-            groups.setdefault(identity, {}).setdefault(_module_variant_label(module), []).append(module)
+    groups = _selected_course_variants(selected_modules, all_modules)
 
     rows: list[dict[str, Any]] = []
     for identity, variants in sorted(groups.items()):
@@ -2732,6 +2764,13 @@ def _group_conflict_overview(selected_modules: List[Any], all_modules: List[Any]
                 }
             )
     return pd.DataFrame(rows)
+
+
+def _render_undecided_groups_note(selected_modules: List[Any]) -> None:
+    """Caption warning that weekly figures include every group of not-yet-decided courses."""
+    courses = _undecided_group_courses(selected_modules, st.session_state.get("processed_modules") or [])
+    if courses:
+        st.caption(t("conflicts.groups_undecided_note", courses=", ".join(courses)))
 
 
 def _render_group_conflict_overview(selected_modules: List[Any], all_modules: List[Any]) -> None:
@@ -3523,6 +3562,23 @@ def _calculate_exam_feasibility(modules: List[Any]) -> pd.DataFrame:
     return pd.DataFrame(exam_rows)
 
 
+def _short_code_with_group(module: Any) -> str:
+    """On-bar text: the short course code, plus a compact group marker
+    ("DIG1-2 A" for "Gruppe A", "DIG1-2 HK2" for "Halbklasse 2") so that
+    parallel groups of one course are distinguishable in the weekly chart."""
+    code = _module_short_code(module)
+    variant = _split_course_variant(module.modulname)[1]
+    if not variant:
+        return code
+    match = re.match(r"GRUPPE\s+(.+)", variant)
+    if match:
+        return f"{code} {match.group(1)}"
+    match = re.match(r"HALBKLASSE\s+(\d+)", variant)
+    if match:
+        return f"{code} HK{match.group(1)}"
+    return code
+
+
 def _weekly_timeline_slots(modules: List[Any]) -> list[dict]:
     """
     Collapse `modules` into one entry per unique (weekday, start, end,
@@ -3561,7 +3617,7 @@ def _weekly_timeline_slots(modules: List[Any]) -> list[dict]:
             {
                 "weekday": weekday,
                 "label": label,
-                "short_label": _module_short_code(module),
+                "short_label": _short_code_with_group(module),
                 "start": start_key,
                 "end": end_key,
                 "duration_minutes": max(
@@ -6273,6 +6329,7 @@ def render_dashboard(modules: List) -> None:
         with col6:
             st.metric(t("dashboard.metric.lessons"), lessons_per_week)
             st.caption(t("dashboard.metric.lessons_caption", hours=hours_per_week, weeks=observed_weeks))
+        _render_undecided_groups_note(modules)
 
         # Only shown when a Zusatzmodule upload actually exists - checked
         # against the full combined dataset (processed_modules_
@@ -6622,6 +6679,7 @@ def render_timetable(modules: List) -> None:
                     busiest_day,
                     help=t("timetable.summary.busiest_day_help", count=weekday_counts[busiest_day]),
                 )
+            _render_undecided_groups_note(filtered_modules)
 
         if layout_mode == "lanes":
             fig = _weekly_timeline_lanes_figure(filtered_modules, color_mode=color_mode, color_sequence=palette)
