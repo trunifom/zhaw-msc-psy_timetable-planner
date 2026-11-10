@@ -5598,7 +5598,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                         only_variant = variant_names[0]
                         exclusion_key = f"{key}::{fam_key}"
                         is_included = st.checkbox(
-                            t("guided.include_component_checkbox"),
+                            t("guided.include_component_checkbox_named", family=fam_key),
                             value=exclusion_key not in excluded_components,
                             key=f"include_component_{exclusion_key}",
                             help=t("guided.include_component_help"),
