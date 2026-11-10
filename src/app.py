@@ -5407,6 +5407,7 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
             open_choices = 0
             family_rows = []
             ambiguous_parallel_components: list[str] = []
+            undecided_group_components: list[str] = []
 
             # Remove-this-module button sits right next to its own expander
             # (not in a separate, unrelated "Deine aktuelle Auswahl" list
@@ -5503,30 +5504,39 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                             }
                         )
                     else:
-                        # 2+ variants -> mutually exclusive alternatives;
-                        # require an explicit selectbox choice. The selector
-                        # key is namespaced by module key + family key so
-                        # each component's choice persists independently
-                        # across reruns and doesn't collide with same-named
-                        # components in a different module.
-                        selector_key = f"variant_select::{key}::{fam_key}"
-                        options = [t("guided.not_selected")] + variant_names
-                        choice = st.selectbox(
+                        # 2+ variants (e.g. "GRUPPE A/B/C"): the student may or
+                        # may not know their group yet - some courses require
+                        # picking a group at enrolment, others assign it at
+                        # the first lecture. So this is a voluntary
+                        # narrowing, not a forced either/or choice: ALL
+                        # variants start selected, and the student unticks
+                        # all but their own once they know it. Sessions of
+                        # the same course never count as conflicts with each
+                        # other (see scheduler.find_time_conflicts), only
+                        # against OTHER courses. The key is namespaced by
+                        # module key + family key so each component's choice
+                        # persists independently across reruns.
+                        selector_key = f"variant_multi::{key}::{fam_key}"
+                        chosen = st.multiselect(
                             t("guided.variant_select_label", family=fam_key),
-                            options=options,
+                            options=variant_names,
+                            default=variant_names,
                             key=selector_key,
                             help=t("guided.variant_select_help"),
                         )
-                        if choice != t("guided.not_selected"):
-                            module_selected.extend(variants[choice])
-                        else:
+                        for variant_name in variant_names:
+                            if variant_name in chosen:
+                                module_selected.extend(variants[variant_name])
+                        if not chosen:
                             open_choices += 1
+                        elif len(chosen) == len(variant_names):
+                            undecided_group_components.append(fam_key)
 
                         family_rows.append(
                             {
                                 c("course_component"): fam_key,
                                 c("component_type"): t("guided.component_choice"),
-                                c("selection"): choice,
+                                c("selection"): ", ".join(chosen) if chosen else t("guided.not_selected"),
                                 c("variants"): ", ".join(variant_names),
                             }
                         )
@@ -5539,6 +5549,13 @@ def render_guided_planning(all_modules: List[Any]) -> List[Any]:
                 st.caption(
                     t("guided.module_caption", exams=len(exam_items), open=open_choices)
                 )
+                if undecided_group_components:
+                    st.caption(
+                        "ℹ️ " + t(
+                            "guided.groups_undecided_hint",
+                            components=", ".join(sorted(set(undecided_group_components))),
+                        )
+                    )
                 if ambiguous_parallel_components:
                     st.caption(
                         "⚠️ " + t(
