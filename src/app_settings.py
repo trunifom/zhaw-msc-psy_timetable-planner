@@ -29,18 +29,13 @@ such still-open toggle lives here, in one place, with its default and the
 reasoning behind it documented right next to it.
 
 How to use this for a test round: edit the value on the right of a flag
-below, save, and restart `streamlit run src/app.py` (a flag is read once per
-script rerun - Streamlit already reruns the whole script on every
-interaction, so no other restart or cache-clearing is needed). To compare
+below, save, and restart `streamlit run src/app.py` so the imported settings
+module is reloaded. To compare
 two versions with two groups of testers, keep two checked-out copies of this
 one file (e.g. via git stash/branch) rather than duplicating app.py.
 
-When a question here gets settled (the team picks a winner after testing),
-remove the flag and hard-code the chosen behavior directly in app.py instead
-of leaving a permanent, never-changed "configuration option" - this file is
-for ACTIVE decisions, not a general-purpose config system. See
-docs/SETTINGS-README.md for the full list with screenshots/context and the
-"what to do once a flag is settled" checklist.
+Visibility switches remain here so features can be enabled again for future
+test rounds. See docs/SETTINGS-README.md for the full list.
 """
 
 from typing import Literal
@@ -48,6 +43,15 @@ from typing import Literal
 # ==========================================
 # Feedback
 # ==========================================
+
+SHOW_SURVEY_WIDGET: bool = True
+"""Show the floating survey link and QR code."""
+
+SURVEY_URL: str = "https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=nZ8aXR8gEEq5g0Uc9ly8HjVDynRD2QxBiVDpF1iRD2RURTYwM0hXUjRPTE5LQjgzS1VQVTZHTDFWUi4u"
+"""Survey address; the QR code is generated from this same URL."""
+
+SHOW_FEEDBACK_WIDGET: bool = False
+"""Show the existing email/bug-report widget."""
 
 FEEDBACK_EMAIL: str = "trug@zhaw.ch"
 """
@@ -118,14 +122,18 @@ this flag; see that doc entry's own status note for what's still open.
 # Appearance
 # ==========================================
 
+SHOW_LANGUAGE_SWITCHER: bool = False
+"""Show the language selector in the header."""
+
+SHOW_THEME_SWITCHER: bool = False
+"""Show the light/dark toggle in the sidebar."""
+
 ThemeDefault = Literal["light", "dark", "auto"]
 
 DEFAULT_THEME: ThemeDefault = "auto"
 """
 The theme ("light"/"dark") a first-time visitor sees before ever touching
-the sidebar light/dark toggle. The manual toggle itself always remains
-available regardless of this setting - this only picks the STARTING point
-for a brand-new session.
+the sidebar light/dark toggle, if SHOW_THEME_SWITCHER is enabled.
 - "light" / "dark": always start every visitor in that theme (the app's
   original, fixed behavior was "light").
 - "auto": try to match the browser/OS's own light/dark preference via

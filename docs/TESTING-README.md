@@ -864,6 +864,14 @@ Tests added together with the "Gruppen" feature set and the UI bug round:
   classification (`upload.known_error` vs `upload.unexpected_error`).
 - `tests/test_data_loader.py`: `stats["dropped_rows"]` out-parameter.
 
+## Umfrage und Sichtbarkeit
+
+`tests/test_app_helpers.py` prüft den konfigurierten Umfrage-Link und den
+daraus erzeugten QR-Code sowie die ein- und ausgeblendeten Varianten von
+Umfrage, E-Mail-Feedback, Sprachwahl und Design-Umschalter mit Streamlit
+AppTest. Die QR-Erzeugung erfolgt lokal; ein neuer `SURVEY_URL`-Wert muss
+keinen separat gepflegten QR-Code ersetzen.
+
 What these tests **cannot** catch (found only by looking at the running app in
 both themes): native `st.info/success/warning/error` boxes keeping Streamlit's
 light background in the app's dark mode (light text on a light box), dark chart

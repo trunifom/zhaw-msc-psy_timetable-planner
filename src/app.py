@@ -31,6 +31,10 @@ How to run:
 import streamlit as st
 import pandas as pd
 import logging
+import base64
+import io
+from functools import lru_cache
+from html import escape
 from typing import List, Tuple, Any, Optional
 from datetime import date, timedelta
 from contextlib import contextmanager
@@ -38,6 +42,7 @@ from urllib.parse import quote
 import re
 import plotly.express as px
 import plotly.graph_objects as go
+import qrcode
 from i18n import get_text
 # Aliased on import (not "import app_settings" + rename every call site):
 # every `settings.FOO` reference elsewhere in this file stays correct as-is.
@@ -182,7 +187,7 @@ if "ui_theme" not in st.session_state:
 # frontend before the script starts running, so reading it directly here -
 # instead of waiting for render_sidebar() to translate it into ui_theme -
 # makes the switch apply immediately, in the same rerun the user toggled it.
-if "sidebar_theme_toggle" in st.session_state:
+if settings.SHOW_THEME_SWITCHER and "sidebar_theme_toggle" in st.session_state:
     st.session_state.ui_theme = "dark" if st.session_state.sidebar_theme_toggle else "light"
 
 # Same fix, same reason, for the language selector: _render_header_
@@ -208,7 +213,7 @@ _language_option_to_code = {
     get_text("de", "sidebar.language_option.en"): "en",
     get_text("de", "sidebar.language_option.fr"): "fr",
 }
-if st.session_state.get("header_language_selector") in _language_option_to_code:
+if settings.SHOW_LANGUAGE_SWITCHER and st.session_state.get("header_language_selector") in _language_option_to_code:
     st.session_state.ui_language = _language_option_to_code[st.session_state.header_language_selector]
 
 # --- Design tokens -----------------------------------------------------
@@ -632,6 +637,20 @@ def _inject_design_system_css() -> None:
             opacity: 1;
             transform: translateX(0);
         }}
+        .zp-feedback.zp-feedback-bug-below {{ top: calc(50% + 80px); }}
+        .zp-feedback.zp-survey summary {{
+            background: var(--zp-accent);
+            color: var(--zp-accent-text);
+            opacity: 1;
+            transform: none;
+            padding: 0.8rem 0.9rem;
+            font-size: 1.15rem;
+            font-weight: 700;
+        }}
+        @media (max-width: 430px) {{
+            .zp-survey .zp-survey-label {{ display: none; }}
+            .zp-survey .zp-feedback-panel {{ max-width: calc(100vw - 65px); }}
+        }}
         .zp-feedback-panel {{
             display: none;
             position: absolute;
@@ -641,6 +660,8 @@ def _inject_design_system_css() -> None:
             margin-right: 0.5rem;
             width: 260px;
             max-width: 78vw;
+            max-height: 85vh;
+            overflow-y: auto;
             background: var(--zp-surface);
             border: 1px solid var(--zp-border);
             border-radius: 14px;
@@ -652,7 +673,7 @@ def _inject_design_system_css() -> None:
         }}
         .zp-feedback-title {{ font-weight: 700; color: var(--zp-text); margin-bottom: 0.4rem; }}
         .zp-feedback-text {{ font-size: 0.83rem; color: var(--zp-text-muted); margin-bottom: 0.6rem; }}
-        .zp-feedback-panel img {{ display: block; margin: 0 auto 0.6rem auto; border-radius: 8px; }}
+        .zp-feedback-panel img {{ display: block; margin: 0 auto 0.6rem auto; border-radius: 8px; max-width: 100%; height: auto; }}
         .zp-feedback-email {{
             font-family: monospace;
             font-size: 0.83rem;
@@ -954,9 +975,10 @@ def _render_feedback_widget() -> None:
     mailto = f"mailto:{settings.FEEDBACK_EMAIL}?subject={quote(t('feedback.mail_subject'))}&body={quote(t('feedback.mail_body'))}"
     qr_src = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={quote(mailto, safe='')}"
 
+    position_class = " zp-feedback-bug-below" if settings.SHOW_SURVEY_WIDGET else ""
     st.markdown(
         f"""
-        <details class="zp-feedback">
+        <details class="zp-feedback{position_class}">
             <summary title="{t('feedback.tab_label')}">🐞</summary>
             <div class="zp-feedback-panel">
                 <div class="zp-feedback-title">{t('feedback.title')}</div>
@@ -966,6 +988,34 @@ def _render_feedback_widget() -> None:
                     <span class="zp-feedback-email">{settings.FEEDBACK_EMAIL}</span>
                 </div>
                 <a class="zp-feedback-btn" href="{mailto}">{t('feedback.button_label')}</a>
+            </div>
+        </details>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+@lru_cache(maxsize=8)
+def _survey_qr_data_url(url: str) -> str:
+    """Generate the survey QR locally from the same URL used by the link."""
+    image = qrcode.make(url)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _render_survey_widget() -> None:
+    url = escape(settings.SURVEY_URL, quote=True)
+    qr_src = _survey_qr_data_url(settings.SURVEY_URL)
+    st.markdown(
+        f"""
+        <details class="zp-feedback zp-survey">
+            <summary title="{escape(t('survey.tab_label'), quote=True)}" aria-label="{escape(t('survey.tab_label'), quote=True)}">📋 <span class="zp-survey-label">{escape(t('survey.tab_label'))}</span></summary>
+            <div class="zp-feedback-panel">
+                <div class="zp-feedback-title">{escape(t('survey.title'))}</div>
+                <div class="zp-feedback-text">{escape(t('survey.instructions'))}</div>
+                <img src="{qr_src}" alt="{escape(t('survey.qr_alt'), quote=True)}" width="200" height="200" />
+                <a class="zp-feedback-btn" href="{url}" target="_blank" rel="noopener noreferrer">{escape(t('survey.button_label'))}</a>
             </div>
         </details>
         """,
@@ -5407,19 +5457,15 @@ def render_sidebar() -> None:
         st.header(t("sidebar.header"))
         st.markdown(t("sidebar.description"))
 
-        with card("sidebar-appearance", "🎨", t("sidebar.section.appearance")):
-            # Light/Dark toggle: only writes st.session_state.ui_theme here;
-            # _inject_design_system_css() (called unconditionally at the top
-            # of every script run, before this function even executes) is
-            # what actually re-renders the CSS on the *next* rerun that this
-            # toggle triggers - there's nothing else to "apply" here.
-            dark_mode = st.toggle(
-                t("sidebar.theme_dark_toggle"),
-                value=st.session_state.get("ui_theme", "light") == "dark",
-                key="sidebar_theme_toggle",
-                help=t("sidebar.theme_help"),
-            )
-            st.session_state.ui_theme = "dark" if dark_mode else "light"
+        if settings.SHOW_THEME_SWITCHER:
+            with card("sidebar-appearance", "🎨", t("sidebar.section.appearance")):
+                dark_mode = st.toggle(
+                    t("sidebar.theme_dark_toggle"),
+                    value=st.session_state.get("ui_theme", "light") == "dark",
+                    key="sidebar_theme_toggle",
+                    help=t("sidebar.theme_help"),
+                )
+                st.session_state.ui_theme = "dark" if dark_mode else "light"
 
         # Group label above both upload cards (requested directly - the two
         # cards below used to follow "Darstellung" with no section break at
@@ -6314,7 +6360,10 @@ def main() -> None:
     # Fixed, always-visible feedback tab (see docstring) - rendered once
     # here rather than per-tab so it stays on screen regardless of which of
     # the five st.tabs() below is active.
-    _render_feedback_widget()
+    if settings.SHOW_SURVEY_WIDGET:
+        _render_survey_widget()
+    if settings.SHOW_FEEDBACK_WIDGET:
+        _render_feedback_widget()
 
     # Render Sidebar
     render_sidebar()
@@ -6325,12 +6374,16 @@ def main() -> None:
     # the sidebar's collapsed/expanded state. `vertical_alignment="center"`
     # keeps the (visually short, label-collapsed) selectbox centered next
     # to the much taller title/subtitle column instead of stuck to its top.
-    header_col_title, header_col_lang = st.columns([5, 1], vertical_alignment="center")
+    if settings.SHOW_LANGUAGE_SWITCHER:
+        header_col_title, header_col_lang = st.columns([5, 1], vertical_alignment="center")
+    else:
+        header_col_title = st.container()
     with header_col_title:
         st.title(t("app.title"))
         st.markdown(t("app.subtitle"))
-    with header_col_lang:
-        _render_header_language_switcher()
+    if settings.SHOW_LANGUAGE_SWITCHER:
+        with header_col_lang:
+            _render_header_language_switcher()
 
     # An st.expander (not card()) specifically so every visitor can collapse
     # this themselves once they've read it, instead of it permanently taking

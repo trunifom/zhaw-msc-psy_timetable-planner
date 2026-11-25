@@ -1157,3 +1157,54 @@ def test_weekly_grid_figure_places_overlapping_blocks_side_by_side():
     x_positions = {round(trace.x[0], 3) for trace in fig.data}
     assert len(x_positions) == 2  # two lanes, not stacked on the same x
     assert app._weekly_grid_figure([], color_sequence=None) is None
+
+
+def test_survey_widget_uses_configured_url_for_link_and_qr(monkeypatch):
+    import base64
+    import io
+    from PIL import Image, ImageChops
+    import qrcode
+
+    url = "https://example.org/survey?id=first&round=2"
+    monkeypatch.setattr(app.settings, "SURVEY_URL", url)
+    rendered = []
+    monkeypatch.setattr(app.st, "markdown", lambda text, **kwargs: rendered.append(text))
+    app._render_survey_widget()
+
+    assert 'href="https://example.org/survey?id=first&amp;round=2"' in rendered[0]
+    qr_data = app._survey_qr_data_url(url)
+    assert qr_data in rendered[0]
+    actual_image = Image.open(io.BytesIO(base64.b64decode(qr_data.split(",", 1)[1]))).convert("RGB")
+    expected_image = qrcode.make(url).get_image().convert("RGB")
+    assert ImageChops.difference(actual_image, expected_image).getbbox() is None
+    assert app._survey_qr_data_url(url) != app._survey_qr_data_url(url + "different")
+
+
+@pytest.mark.parametrize(
+    "survey,feedback,language,theme",
+    [(True, False, False, False), (False, True, True, True), (True, True, True, True)],
+)
+def test_pilot_visibility_settings_control_rendered_widgets(monkeypatch, survey, feedback, language, theme):
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(app.settings, "SHOW_SURVEY_WIDGET", survey)
+    monkeypatch.setattr(app.settings, "SHOW_FEEDBACK_WIDGET", feedback)
+    monkeypatch.setattr(app.settings, "SHOW_LANGUAGE_SWITCHER", language)
+    monkeypatch.setattr(app.settings, "SHOW_THEME_SWITCHER", theme)
+    at = AppTest.from_file(str(Path(app.__file__)), default_timeout=30).run()
+    assert not at.exception
+    html = "\n".join(element.value for element in at.markdown)
+    assert ('class="zp-feedback zp-survey"' in html) is survey
+    assert ("🐞</summary>" in html) is feedback
+    assert any(element.key == "header_language_selector" for element in at.selectbox) is language
+    assert any(element.key == "sidebar_theme_toggle" for element in at.toggle) is theme
+    if survey and feedback:
+        assert 'class="zp-feedback zp-feedback-bug-below"' in html
+    if language and theme:
+        at.selectbox(key="header_language_selector").select("English").run()
+        assert not at.exception
+        assert "Timetable" in at.title[0].value
+        at.toggle(key="sidebar_theme_toggle").set_value(True).run()
+        assert not at.exception
+        assert at.session_state["ui_theme"] == "dark"

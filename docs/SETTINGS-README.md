@@ -25,17 +25,14 @@ Testrunde Code zu ändern, wird so ein offenes Detail als Flag in
 `src/app_settings.py` abgelegt.
 
 **Anwendung:** Wert in `src/app_settings.py` ändern, speichern, App neu
-starten (`streamlit run src/app.py`). Ein Flag wird pro Skript-Rerun einmal
-gelesen - kein Cache-Leeren nötig. Um zwei Varianten gleichzeitig mit zwei
+starten (`streamlit run src/app.py`), damit das importierte Modul neu geladen
+wird. Um zwei Varianten gleichzeitig mit zwei
 Testgruppen zu vergleichen: zwei ausgecheckte Kopien des Repos mit
 unterschiedlichem `app_settings.py`-Inhalt betreiben (z.B. über zwei
 Git-Branches), nicht `app.py` duplizieren.
 
-**Wenn eine Frage entschieden ist:** Flag aus `app_settings.py` entfernen
-und das gewählte Verhalten direkt in `app.py` fest verdrahten, statt eine
-Konfigurationsoption dauerhaft stehen zu lassen, die sich nie wieder ändert.
-Diese Datei ist für aktive, noch offene Entscheidungen gedacht - kein
-allgemeines Konfigurationssystem.
+Sichtbarkeitsschalter bleiben auch nach einer Testrunde erhalten, damit
+Funktionen später ohne Codeänderung wieder aktiviert werden können.
 
 ---
 
@@ -44,10 +41,15 @@ allgemeines Konfigurationssystem.
 | Flag | Typ | Default | Wirkung |
 |---|---|---|---|
 | `FEEDBACK_EMAIL` | `str` | `"trug@zhaw.ch"` | Empfänger-Adresse des Feedback-Widgets (🐞-Tab). |
+| `SHOW_SURVEY_WIDGET` | `bool` | `True` | Zeigt den Umfrage-Tab mit Link und QR-Code. |
+| `SURVEY_URL` | `str` | Microsoft-Forms-Link | Adresse der Umfrage für Button und QR-Code. |
+| `SHOW_FEEDBACK_WIDGET` | `bool` | `False` | Zeigt/versteckt den bisherigen 🐞-Tab. |
+| `SHOW_LANGUAGE_SWITCHER` | `bool` | `False` | Zeigt/versteckt die Sprachwahl im Kopfbereich. |
+| `SHOW_THEME_SWITCHER` | `bool` | `False` | Zeigt/versteckt den Hell-/Dunkel-Umschalter in der Sidebar. |
 | `SHOW_RAW_DATA_TAB` | `bool` | `False` | Zeigt/versteckt den "🗄️ Rohdaten"-Tab komplett. |
 | `SHOW_EXTENDED_QUICKSTART` | `bool` | `True` | Zeigt Dauer/Voraussetzungen/Anmeldungs-Hinweis in der Schnellstart-Karte zusätzlich an. |
 | `QUICKSTART_DEFAULT_EXPANDED` | `bool` | `True` | Start-Zustand (auf-/zugeklappt) der jetzt interaktiven Schnellstart-Karte. |
-| `DEFAULT_THEME` | `"light" \| "dark" \| "auto"` | `"auto"` | Start-Theme für neue Besucher:innen (Sidebar-Umschalter bleibt immer verfügbar). |
+| `DEFAULT_THEME` | `"light" \| "dark" \| "auto"` | `"auto"` | Start-Theme für neue Besucher:innen, auch bei ausgeblendetem Umschalter. |
 | `CHART_TITLE_STYLE` | `"label" \| "headline"` | `"headline"` | Dashboard-Chart-Überschriften als neutrales Label oder als datengetriebene Aussage. |
 | `SHOW_STEP_PROGRESS_INDICATOR` | `bool` | `True` | Zeigt den benannten Schritt-Fortschritt ("1 Datei hochladen → …") unter der Schnellstart-Karte. |
 | `EXPORT_SECTION_PLACEMENT` | `"main" \| "sidebar"` | `"main"` | Export-Bereich als eigene Karte im Hauptbereich oder wie bisher in der Sidebar. |
@@ -55,6 +57,23 @@ allgemeines Konfigurationssystem.
 *(Diese Tabelle wächst mit jedem weiteren Flag - siehe die einzelnen
 Abschnitte unten für Details. Neue Einträge werden in dem Commit ergänzt,
 der das jeweilige Flag einführt.)*
+
+---
+
+## Umfrage und Sichtbarkeit
+
+Für die studentische Testphase sind `SHOW_SURVEY_WIDGET = True` und
+`SHOW_FEEDBACK_WIDGET = False` gesetzt. Zum späteren Einblenden des
+🐞-Tabs `SHOW_FEEDBACK_WIDGET = True` setzen; beide Tabs lassen sich
+unabhängig voneinander anzeigen. Der Umfrage-Link wird nur in `SURVEY_URL`
+geändert; der QR-Code wird lokal aus derselben Adresse erzeugt.
+
+`SHOW_LANGUAGE_SWITCHER` und `SHOW_THEME_SWITCHER` schalten die jeweiligen
+Bedienelemente ein oder aus. Bei neuen Sessions bleibt Deutsch die
+Standardsprache; `DEFAULT_THEME` bestimmt weiterhin das Startdesign. Setze
+den betreffenden Wert auf `True`, um den Umschalter wieder anzubieten.
+Nach Änderungen an `src/app_settings.py` die App neu starten bzw. die
+Cloud-App neu starten, damit das importierte Modul neu geladen wird.
 
 ---
 
@@ -151,9 +170,8 @@ entsprechend), funktioniert in Hell- und Dunkelmodus.
 
 **Was:** Welches Theme eine neue Besucherin/ein neuer Besucher beim allerersten
 Laden sieht, bevor sie/er den Hell/Dunkel-Umschalter in der Sidebar
-überhaupt angefasst hat. Der manuelle Umschalter selbst bleibt **immer**
-verfügbar, unabhängig von diesem Flag - es wird nur der Startpunkt
-bestimmt.
+überhaupt angefasst hat. Ob der manuelle Umschalter sichtbar ist, bestimmt
+`SHOW_THEME_SWITCHER`; dieses Flag bestimmt nur den Startpunkt.
 
 - `"light"`: immer hell starten (ursprüngliches, festes Verhalten).
 - `"dark"`: immer dunkel starten.

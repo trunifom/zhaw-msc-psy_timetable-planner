@@ -46,7 +46,7 @@ Besonders unterstützt werden:
 	- Detailansicht nach Datum und Uhrzeit
 	- Überlappungsminuten und Prozentwerten
 - **Anwesenheits-Ampel** (🚦, sichtbar im Dashboard und im Konfliktanalyse-Tab): zeigt pro Kurs, wie viel Prozent der Termine mit der aktuellen Auswahl und den Abwesenheits-Regeln realistisch besuchbar sind (rot/orange/grün). Ist die offizielle Mindestanforderung eines Kurses in den Quelldaten bekannt (Spalte "Anwesenheitspflicht"), wird exakt dagegen geprüft; fehlt sie - der heutige Regelfall - dient die ZHAW-übliche Orientierung (mind. 50 %, teils 80 % oder 100 %) als Näherung. Die Ampel berücksichtigt sowohl erkannte Terminkollisionen als auch aktive Abwesenheits-Regeln, keine offizielle Anwesenheitskontrolle.
-- Design-System (durchgängig auf allen 5 Tabs plus Sidebar, Light/Dark umschaltbar über eine eigene "Darstellung"-Sektion in der Sidebar):
+- Design-System (durchgängig auf allen Tabs plus Sidebar; Light/Dark-Umschalter bei Bedarf in den Einstellungen aktivierbar):
 	- einheitliche Karten-Sektionen (Icon + Titel + Trennlinie) statt reiner Whitespace-Trennung
 	- konsistente Semantikfarben (Erfolg/Warnung/Kritisch/Info) über die ganze App, sowohl als Badges/Zeilenfärbung in Tabellen als auch in Charts
 	- Tabellen mit typisierten Spalten (`st.column_config`): formatierte Datum-/Zeit-/Zahlenspalten statt Rohstrings, Status-Spalten farbcodiert, Überlappungs-/Risikowerte als sequenzieller Rot-Verlauf (abhängigkeitsfrei implementiert, siehe Troubleshooting)
@@ -71,7 +71,7 @@ Besonders unterstützt werden:
 		- Termine ohne erkennbares Datum werden als ganztägiger, nicht-blockierender Platzhalter markiert statt stillschweigend zu fehlen
 		- stabile UIDs: erneuter Export derselben Auswahl aktualisiert bestehende Kalendereinträge statt Duplikate zu erzeugen
 - Mehrsprachigkeit (de/en/fr) über zentrale i18n-Keys
-- Feedback-Tab: dezenter, immer sichtbarer Tab am rechten Bildschirmrand für Lob, Kritik, Verbesserungsvorschläge oder Bug-Reports (E-Mail-Link + QR-Code, kein Formular/Mailserver nötig) - Details siehe Abschnitt "Feedback geben"
+- Umfrage-Tab am rechten Bildschirmrand mit Link und QR-Code; der bisherige E-Mail-/Bug-Tab kann in den Einstellungen wieder aktiviert werden.
 
 ## Architektur
 
@@ -122,7 +122,7 @@ Die drei Auswahltabellen in Schritt 2 (Modulbasiert/Nach Kursname/"Alle Termine 
 
 Zusätzliche Einstellungen in der Sidebar bzw. im Dashboard:
 
-- **Dunkles/Helles Design** (Toggle "🌙 Dunkles Design") in der eigenen "Darstellung"-Sektion ganz oben in der Sidebar, **Sprache** (de/en/fr) direkt darunter in "Daten und Sprache" - beides jederzeit umschaltbar, wirkt sofort (auch die Sidebar-Beschriftung selbst) ohne zusätzlichen Reload
+- **Design und Sprache:** Die Umschalter sind für die Testrunde ausgeblendet und lassen sich in [src/app_settings.py](src/app_settings.py) wieder aktivieren. Das Startdesign wird weiterhin über `DEFAULT_THEME` bestimmt.
 - Im Dashboard-Tab hat jedes Diagramm ein einklappbares "🎨 Diagramm-Einstellungen"-Panel: Farbpalette bzw. Farbskala wählen, einzelne Wochentage aus-/einblenden, und je nach Chart zusätzlich Farbmodus oder Ansicht umschalten. Die native Plotly-Werkzeugleiste über jedem Diagramm erlaubt zusätzlich Zoomen, Verschieben und PNG-Export
 
 ## Zusatzmodule für Passerellen-Studierende
@@ -144,20 +144,17 @@ Für Studierende, die laut individuellem Studienplan zusätzliche Module aus ein
 
 ## Feedback geben
 
-Am rechten Bildschirmrand, vertikal mittig, klebt ein kleiner 🐞-Tab, der in Ruhe grösstenteils hinter der Bildschirmkante versteckt bleibt (bewusst dezent, um vom Inhalt nicht abzulenken) und bei Mausüberfahrt vollständig ins Bild gleitet; ein Klick öffnet ein Panel, das auch ohne erneutes Hovern offen bleibt (praktisch für Touch-Geräte ohne Hover-Zustand). Das Panel lädt ausdrücklich zu **jeder Art von Rückmeldung** ein - Lob, Kritik, ein Verbesserungsvorschlag oder ein gefundener Bug - nicht nur zu Bug-Reports.
+Am rechten Bildschirmrand öffnet **📋 Umfrage** ein Panel mit einem Button
+zum Feedback-Formular und einem QR-Code für das Handy. Beides verwendet
+`SURVEY_URL` aus [src/app_settings.py](src/app_settings.py); der QR-Code
+wird lokal erzeugt. Die Umfrage soll nach dem Ausprobieren des Tools
+ausgefüllt werden.
 
-Enthalten sind:
-
-- ein `mailto:`-Link/-Button, der das lokale E-Mail-Programm mit vorausgefülltem Betreff öffnet
-- ein QR-Code, der denselben `mailto:`-Link kodiert, zum Scannen mit dem Handy
-
-**Warum kein Formular:** Streamlit Community Cloud stellt keinen Mailserver bereit, ein selbst konfigurierter SMTP-Versand (Zugangsdaten als Secrets etc.) wäre für diesen Zweck deutlich überdimensioniert. Ein `mailto:`-Link braucht dagegen keinen Server - das "Formular" ist einfach das E-Mail-Programm der nutzenden Person.
-
-**Empfänger-Adresse ändern:** steht als einzelne Konstante `FEEDBACK_EMAIL` ganz am Anfang von [src/app.py](src/app.py) (eigener "APP SETTINGS"-Abschnitt, direkt nach den Imports) - in Sekunden anpassbar, ohne die restliche Widget-Logik zu verstehen.
-
-**QR-Code-Erzeugung:** Das QR-Bild wird vom Browser direkt bei einer öffentlichen QR-Bild-API (`api.qrserver.com`) geladen, statt serverseitig mit einer Python-Bibliothek erzeugt zu werden - eine bewusste Entscheidung, um keine neue Abhängigkeit (`qrcode`/`Pillow`) in `requirements.txt`/`environment.yaml` einzuführen (siehe Abschnitt "Troubleshooting" zu früheren Deployment-Problemen mit Abhängigkeiten). Übertragen wird dabei nur die feste Feedback-Mailadresse, keine Nutzerdaten.
-
-Technisch ist der Tab reines HTML/CSS (`<details>`/`<summary>`, siehe `_render_feedback_widget()` und die `.zp-feedback*`-Regeln in `_inject_design_system_css()` in `src/app.py`) - kein Streamlit-Widget und kein `session_state` dahinter, damit das Öffnen keinen Skript-Rerun auslöst.
+Der bisherige 🐞-Tab mit E-Mail-Link ist für die Testrunde ausgeblendet,
+aber über `SHOW_FEEDBACK_WIDGET` jederzeit wieder aktivierbar. Der
+Umfrage-Tab lässt sich über `SHOW_SURVEY_WIDGET` ausblenden. Alle
+Sichtbarkeitsschalter sind in [docs/SETTINGS-README.md](docs/SETTINGS-README.md)
+beschrieben.
 
 ## Dateninput und Annahmen
 
@@ -289,11 +286,11 @@ zhaw-msc-psy_timetable-planner/
 - Warum kein `matplotlib` als Abhängigkeit: die farbig hinterlegten Überlappungs-/Risikowerte in den Tabellen sehen aus wie pandas' `Styler.background_gradient()`, sind aber bewusst selbst gebaut (`_style_sequential_red` in `src/app.py`) – `background_gradient()` bricht sonst beim ersten Zugriff mit `ImportError: background_gradient requires matplotlib.` ab, da `matplotlib` nirgends in `requirements.txt`/`environment.yaml` steht. Beim Ergänzen neuer farbcodierter Tabellen bitte diese Funktion wiederverwenden statt `background_gradient()` neu einzuführen
 - `.streamlit/config.toml` (setzt `primaryColor` auf ZHAW Blau, damit native Streamlit-Steuerelemente wie Radio-Buttons/Checkboxen/Toggles/Buttons nicht mehr Streamlits Standard-Rot verwenden) wird nur erkannt, wenn es relativ zum **Arbeitsverzeichnis der Shell** beim Start liegt – also im Repo-Root, wenn wie dokumentiert per `streamlit run src/app.py` **aus dem Repo-Root** gestartet wird. Ein Start via `cd src && streamlit run app.py` (Arbeitsverzeichnis wäre dann `src/`) findet die Datei nicht und die Steuerelemente fallen zurück auf Streamlits Standardfarbe – falls Buttons/Radios plötzlich wieder rot statt ZHAW-blau erscheinen, zuerst das Arbeitsverzeichnis beim Start prüfen, nicht den Farbwert
 - Farben/Kontraste stimmen für ein bestimmtes UI-Element (Button, Tabelle, Dropdown, Chart-Text) nach einem Theme-Wechsel nicht: `_inject_design_system_css()` in `src/app.py` deckt Streamlits native Widgets nur ab, wenn sie dort explizit per CSS-Selektor angesprochen werden (`.stButton`, `.stTextInput input`, `[data-baseweb="select"]` usw.) – ein neuer, noch nicht dort erfasster Widget-Typ fällt sonst auf Streamlits eigenes, vom App-Theme-Toggle unabhängiges natives Erscheinungsbild zurück. Bei einem neuen Widget-Typ in der UI immer in beiden Themes im Browser gegenprüfen, nicht nur im Code lesen (siehe auch "What isn't covered" in [docs/TESTING-README.md](docs/TESTING-README.md))
-- QR-Code im Feedback-Tab (rechter Bildschirmrand, siehe Abschnitt "Feedback geben") lädt nicht oder bleibt leer: das Bild kommt von einer externen API (`api.qrserver.com`) und wird vom **Browser** geladen, nicht vom Streamlit-Server - es braucht also Internetzugriff im Browser der nutzenden Person (den die App als Web-App ohnehin voraussetzt), nicht auf dem Server selbst. Der `mailto:`-Button daneben funktioniert davon unabhängig immer, auch ohne dass das QR-Bild lädt
+- Der QR-Code im optionalen E-Mail-/Bug-Tab kommt von einer externen API (`api.qrserver.com`); der Umfrage-QR-Code wird hingegen lokal erzeugt.
 
 ## Datenschutz
 
 - Verarbeitung erfolgt in der laufenden Session (in-memory)
 - keine persistente Datenbank notwendig
 - hochgeladene persönliche Planungsdaten sollten nicht ins Repository eingecheckt werden
-- der Feedback-Tab (siehe "Feedback geben") lädt das QR-Code-Bild von einer externen API (`api.qrserver.com`); übertragen wird dabei ausschliesslich die feste, öffentliche Feedback-Mailadresse (`FEEDBACK_EMAIL` in `src/app.py`) - keine Nutzer- oder Planungsdaten
+- der optionale E-Mail-/Bug-Tab lädt sein QR-Bild von `api.qrserver.com` und überträgt dabei die konfigurierte E-Mail-Adresse sowie Betreff und Nachrichtentext, aber keine Planungsdaten. Der Umfrage-QR-Code benötigt keinen externen QR-Dienst.

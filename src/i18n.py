@@ -63,6 +63,12 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "feedback.mail_subject": "ZHAW Studienplaner – Feedback",
         "feedback.mail_body": "Was möchtest du mitteilen? (Lob, Kritik, Idee oder Bug - alles willkommen. Bei einem Bug gerne auch: welcher Tab, welche Datei)\n\n",
 
+        "survey.tab_label": "Umfrage",
+        "survey.title": "📋 Deine Meinung zählt",
+        "survey.instructions": "Probiere den Stundenplan-Planer aus und teile uns deine Erfahrungen in der Umfrage mit. Öffne das Formular oder scanne den QR-Code:",
+        "survey.button_label": "Umfrage öffnen",
+        "survey.qr_alt": "QR-Code zur Feedback-Umfrage",
+
         "sidebar.header": "⚙️ Steuerung",
         "sidebar.description": "Lade hier deinen Stundenplan hoch und passe die Ansicht an.",
         "ui.help_button": "ℹ️ Hilfe",
@@ -523,6 +529,12 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "feedback.mail_subject": "ZHAW Timetable Planner – Feedback",
         "feedback.mail_body": "What would you like to share? (praise, criticism, an idea, or a bug - all welcome. For a bug, feel free to mention which tab/file):\n\n",
 
+        "survey.tab_label": "Survey",
+        "survey.title": "📋 Your feedback matters",
+        "survey.instructions": "Try the timetable planner and share your experience in the survey. Open the form or scan the QR code:",
+        "survey.button_label": "Open survey",
+        "survey.qr_alt": "QR code for the feedback survey",
+
         "sidebar.header": "⚙️ Controls",
         "sidebar.description": "Upload your timetable and adjust the display.",
         "ui.help_button": "ℹ️ Help",
@@ -982,6 +994,12 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "feedback.qr_alt": "QR code pour un e-mail à {email}",
         "feedback.mail_subject": "Planificateur d'études ZHAW – Feedback",
         "feedback.mail_body": "Que souhaites-tu partager ? (compliment, critique, idée ou bug - tout est bienvenu. Pour un bug, précise si possible l'onglet/le fichier) :\n\n",
+
+        "survey.tab_label": "Enquête",
+        "survey.title": "📋 Ton avis compte",
+        "survey.instructions": "Essaie le planificateur d'études et partage ton expérience dans l'enquête. Ouvre le formulaire ou scanne le QR code :",
+        "survey.button_label": "Ouvrir l'enquête",
+        "survey.qr_alt": "QR code pour l'enquête de feedback",
 
         "sidebar.header": "⚙️ Commandes",
         "sidebar.description": "Importe ton horaire et ajuste l'affichage.",
