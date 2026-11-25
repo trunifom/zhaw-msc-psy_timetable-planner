@@ -86,6 +86,9 @@ Besonders unterstützt werden:
 
 ## Schnellstart
 
+Für die zeitlich begrenzte Unterstützung der veröffentlichten App siehe
+[zeitgesteuerter Streamlit-Besuch](docs/STREAMLIT-WAKE-README.md).
+
 ### 1. Environment vorbereiten
 
 Variante A: Conda mit environment.yaml

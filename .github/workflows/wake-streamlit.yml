@@ -1,0 +1,48 @@
+name: Streamlit-App aufwecken
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * *"
+      timezone: "Europe/Zurich"
+    - cron: "27 11 * * *"
+      timezone: "Europe/Zurich"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wake-streamlit-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      STREAMLIT_APP_URL: ${{ vars.STREAMLIT_APP_URL }}
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Python einrichten
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Browserautomation installieren
+        run: python -m pip install -r scripts/requirements-wake.txt
+      - name: Konfiguration prüfen
+        run: python scripts/wake_streamlit.py --check-config
+      - name: Chromium und Systemabhängigkeiten installieren
+        run: python -m playwright install --with-deps chromium
+      - name: App besuchen und Bereitschaft prüfen
+        run: python scripts/wake_streamlit.py
+      - name: Fehlerbild bereitstellen
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: streamlit-wake-diagnostic
+          path: wake-diagnostics/failure.png
+          retention-days: 7
+          if-no-files-found: ignore
